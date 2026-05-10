@@ -1,0 +1,142 @@
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session as DBSession
+
+from app.core.database import get_db
+from app.models.project import ProjectInfo
+from app.models.session import Session
+from app.models.window_item import WindowItem
+from app.schemas.extraction import (
+    ExtractionResponse,
+    PatchExtractionRequest,
+    PatchExtractionResponse,
+    ProjectInfoSchema,
+    WindowItemSchema,
+)
+
+router = APIRouter(prefix="/api/sessions", tags=["extraction"])
+
+_EDITABLE_WINDOW_FIELDS = [
+    "tag", "width", "height", "area", "quantity",
+    "opening_type", "material", "u_value", "shgc", "vt", "glass_type", "notes",
+]
+
+
+@router.get("/{session_id}/extraction", response_model=ExtractionResponse)
+def get_extraction(session_id: str, db: DBSession = Depends(get_db)) -> ExtractionResponse:
+    session = db.query(Session).filter(Session.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    if session.status not in {"review_ready", "confirmed", "recommendation_ready"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Extraction is not ready yet. Session status: {session.status}",
+        )
+
+    project = db.query(ProjectInfo).filter(ProjectInfo.session_id == session_id).first()
+    items = (
+        db.query(WindowItem)
+        .filter(WindowItem.session_id == session_id)
+        .order_by(WindowItem.created_at)
+        .all()
+    )
+
+    warnings: list[str] = []
+    if session.error_message:
+        warnings.append(session.error_message)
+
+    project_schema: ProjectInfoSchema | None = None
+    if project:
+        project_schema = ProjectInfoSchema(
+            project_name=project.project_name,
+            site_address=project.site_address,
+            city=project.city,
+            state=project.state,
+            zip_code=project.zip_code,
+            detected_file_type=project.detected_file_type or session.uploaded_file_type,
+            detected_relevant_pages=project.detected_relevant_pages,
+        )
+
+    window_schemas = [
+        WindowItemSchema(
+            id=item.id,
+            tag=item.tag,
+            material_type=item.material_type,
+            width=item.width,
+            height=item.height,
+            area=item.area,
+            quantity=item.quantity,
+            opening_type=item.opening_type,
+            material=item.material,
+            u_value=item.u_value,
+            shgc=item.shgc,
+            vt=item.vt,
+            glass_type=item.glass_type,
+            confidence=item.confidence,
+            notes=item.notes,
+        )
+        for item in items
+    ]
+
+    return ExtractionResponse(
+        session_id=session_id,
+        project_info=project_schema,
+        window_items=window_schemas,
+        warnings=warnings,
+    )
+
+
+@router.patch("/{session_id}/extraction", response_model=PatchExtractionResponse)
+def patch_extraction(
+    session_id: str,
+    body: PatchExtractionRequest,
+    db: DBSession = Depends(get_db),
+) -> PatchExtractionResponse:
+    session = db.query(Session).filter(Session.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    if session.status not in {"review_ready", "confirmed"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot edit extraction in status: {session.status}",
+        )
+
+    # ── Update project info ───────────────────────────────────────────────
+    if body.project_info is not None:
+        project = db.query(ProjectInfo).filter(ProjectInfo.session_id == session_id).first()
+        if project:
+            patch = body.project_info.model_dump(exclude_unset=True)
+            for k, v in patch.items():
+                setattr(project, k, v)
+
+    # ── Update window items ───────────────────────────────────────────────
+    if body.window_items:
+        for patch_item in body.window_items:
+            db_item = db.query(WindowItem).filter(WindowItem.id == patch_item.id).first()
+            if not db_item:
+                continue
+
+            original = db_item.original_extraction or {}
+            user_edits = dict(db_item.user_edits or {})
+
+            patch_fields = patch_item.model_dump(exclude={"id"}, exclude_unset=True)
+            for field_name, new_value in patch_fields.items():
+                if field_name not in _EDITABLE_WINDOW_FIELDS:
+                    continue
+                original_value = original.get(field_name)
+                edited = new_value != original_value
+                user_edits[field_name] = {
+                    "original_value": original_value,
+                    "current_value": new_value,
+                    "edited_by_user": edited,
+                }
+                setattr(db_item, field_name, new_value)
+
+            db_item.user_edits = user_edits
+            db_item.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return PatchExtractionResponse(session_id=session_id, status="saved")

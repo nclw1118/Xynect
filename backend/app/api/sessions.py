@@ -1,4 +1,3 @@
-import time
 import uuid
 from datetime import datetime, timezone
 
@@ -6,16 +5,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import settings
-from app.core.database import SessionLocal, get_db
+from app.core.database import get_db
 from app.models.progress_step import ProgressStep
 from app.models.session import Session
 from app.schemas.session import ProgressResponse, ProgressStepSchema, UploadResponse
+from app.services.extraction.extraction_agent import run_extraction
 from app.services.file_detection import classify_file, validate_extension, validate_magic_bytes
 from app.services.file_storage import save_upload
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
-# Steps emitted for every upload, in order.
 _UPLOAD_STEPS = [
     "Uploading file",
     "Detecting file type",
@@ -46,35 +45,6 @@ def _mark(steps: list[ProgressStep], name: str, status: str) -> None:
             return
 
 
-def _placeholder_extraction(session_id: str) -> None:
-    """
-    Background task: simulates extraction completing and moves the session
-    to review_ready so the processing page can redirect.
-    No real extraction happens here — that is Phase 4+.
-    """
-    time.sleep(1.0)
-    db = SessionLocal()
-    try:
-        session = db.query(Session).filter(Session.id == session_id).first()
-        if not session:
-            return
-        step = (
-            db.query(ProgressStep)
-            .filter(
-                ProgressStep.session_id == session_id,
-                ProgressStep.name == "Preparing extraction",
-            )
-            .first()
-        )
-        if step:
-            step.status = "completed"
-            step.updated_at = datetime.now(timezone.utc)
-        session.status = "review_ready"
-        db.commit()
-    finally:
-        db.close()
-
-
 @router.post("/upload", response_model=UploadResponse)
 async def upload_file(
     background_tasks: BackgroundTasks,
@@ -83,7 +53,6 @@ async def upload_file(
 ) -> UploadResponse:
     content = await file.read()
 
-    # Size guard
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(content) > max_bytes:
         size_mb = len(content) / 1024 / 1024
@@ -92,13 +61,11 @@ async def upload_file(
             detail=f"File too large ({size_mb:.1f} MB). Maximum allowed is {settings.max_upload_mb} MB.",
         )
 
-    # Reject empty files
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     filename = file.filename or "upload"
 
-    # Extension + magic-byte validation
     try:
         ext = validate_extension(filename)
         validate_magic_bytes(content, ext)
@@ -106,7 +73,6 @@ async def upload_file(
         raise HTTPException(status_code=400, detail=str(exc))
 
     detected_type = classify_file(content, ext)
-
     session_id = str(uuid.uuid4())
 
     session = Session(
@@ -128,7 +94,7 @@ async def upload_file(
 
     db.commit()
 
-    background_tasks.add_task(_placeholder_extraction, session_id)
+    background_tasks.add_task(run_extraction, session_id, saved_path, detected_type)
 
     return UploadResponse(
         session_id=session_id,
@@ -150,7 +116,6 @@ def get_progress(session_id: str, db: DBSession = Depends(get_db)) -> ProgressRe
         .all()
     )
 
-    # current_step: the active step if any, otherwise the most recently completed step
     current_step: str | None = next(
         (s.name for s in steps if s.status == "active"),
         next((s.name for s in reversed(steps) if s.status == "completed"), None),
