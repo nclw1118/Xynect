@@ -40,7 +40,43 @@ Health check: http://localhost:8000/api/health
 
 API docs: http://localhost:8000/docs
 
-### 4. Start the frontend
+### 4. Run database migrations
+
+Run once after first setup, and again after any schema change:
+
+```bash
+cd backend
+source .venv/bin/activate
+alembic upgrade head
+```
+
+Check current migration state:
+
+```bash
+alembic current
+```
+
+### 5. Seed fake suppliers
+
+Run once (idempotent — safe to re-run):
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m app.seed.suppliers
+```
+
+### 6. Verify database connectivity
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m app.core.database
+```
+
+Prints `Database connection OK` if Postgres is reachable.
+
+### 7. Start the frontend
 
 ```bash
 cd frontend

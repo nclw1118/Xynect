@@ -1,4 +1,10 @@
-from pydantic_settings import BaseSettings
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolves to the project root (Xynect/) regardless of CWD.
+# config.py lives at backend/app/core/config.py → 4 parents up = project root.
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -15,7 +21,11 @@ class Settings(BaseSettings):
     llm_provider: str = "stub"
     llm_model: str = "gpt-4.1"
 
-    model_config = {"env_file": "../.env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()
