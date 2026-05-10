@@ -1,0 +1,11 @@
+.env
+.venv
+node_modules
+.next
+__pycache__
+*.pyc
+.DS_Store
+storage/uploads
+backend/.venv/
+frontend/node_modules/
+frontend/.next/
