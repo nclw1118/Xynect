@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import type { ExtractionResponse, ProjectInfo, WindowItem } from "@/lib/types";
 import { ProjectInfoForm } from "@/components/ProjectInfoForm";
 import { EditableWindowTable } from "@/components/EditableWindowTable";
+import { ConfirmationModal } from "@/components/ConfirmationModal";
 import { Button } from "@/components/ui/button";
 
 export default function ReviewPage() {
@@ -18,10 +19,10 @@ export default function ReviewPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Fetch extraction on mount ─────────────────────────────────────────
   useEffect(() => {
     apiFetch<ExtractionResponse>(`/api/sessions/${sessionId}/extraction`)
       .then((data) => {
@@ -34,7 +35,6 @@ export default function ReviewPage() {
       );
   }, [sessionId]);
 
-  // ── Debounced PATCH ───────────────────────────────────────────────────
   const schedulePatch = (pi: ProjectInfo | null, wi: WindowItem[]) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
@@ -65,7 +65,6 @@ export default function ReviewPage() {
     schedulePatch(projectInfo, updated);
   };
 
-  // ── Render ────────────────────────────────────────────────────────────
   if (loadError)
     return (
       <main className="flex min-h-screen items-center justify-center px-6 bg-white dark:bg-zinc-950">
@@ -84,59 +83,62 @@ export default function ReviewPage() {
     );
 
   return (
-    <main className="min-h-screen bg-white dark:bg-zinc-950 px-4 py-10">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <>
+      {showModal && (
+        <ConfirmationModal
+          sessionId={sessionId}
+          onClose={() => setShowModal(false)}
+          onConfirmed={(next) => router.push(next)}
+        />
+      )}
 
-        {/* Header */}
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <p className="text-xs font-mono tracking-widest text-zinc-400 uppercase mb-1">Review</p>
-            <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-              Review Extracted Window Data
-            </h1>
+      <main className="min-h-screen bg-white dark:bg-zinc-950 px-4 py-10">
+        <div className="max-w-6xl mx-auto space-y-8">
+
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <p className="text-xs font-mono tracking-widest text-zinc-400 uppercase mb-1">Review</p>
+              <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+                Review Extracted Window Data
+              </h1>
+            </div>
+            <div className="flex gap-3 items-center">
+              {saving && <span className="text-xs text-zinc-400">Saving…</span>}
+              {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+              <a
+                href="/upload"
+                className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+              >
+                ← Back to Upload
+              </a>
+              <Button size="lg" onClick={() => setShowModal(true)}>
+                Confirm
+              </Button>
+            </div>
           </div>
-          <div className="flex gap-3 items-center">
-            {saving && <span className="text-xs text-zinc-400">Saving…</span>}
-            {saveError && <span className="text-xs text-red-500">{saveError}</span>}
-            <a
-              href="/upload"
-              className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
-            >
-              ← Back to Upload
-            </a>
-            <Button
-              onClick={() => router.push(`/recommendations/${sessionId}`)}
-              size="lg"
-            >
-              Confirm
-            </Button>
+
+          {extraction.warnings.length > 0 && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-700 p-4 space-y-1">
+              {extraction.warnings.map((w, i) => (
+                <p key={i} className="text-sm text-amber-700 dark:text-amber-300">{w}</p>
+              ))}
+            </div>
+          )}
+
+          <ProjectInfoForm info={projectInfo} onChange={handleProjectChange} />
+
+          <div className="space-y-2">
+            <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+              Window Schedule
+              <span className="ml-2 font-normal text-zinc-400">
+                ({windowItems.length} {windowItems.length === 1 ? "row" : "rows"})
+              </span>
+            </h2>
+            <EditableWindowTable items={windowItems} onChange={handleWindowsChange} />
           </div>
+
         </div>
-
-        {/* Warnings */}
-        {extraction.warnings.length > 0 && (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-700 p-4 space-y-1">
-            {extraction.warnings.map((w, i) => (
-              <p key={i} className="text-sm text-amber-700 dark:text-amber-300">{w}</p>
-            ))}
-          </div>
-        )}
-
-        {/* Project info */}
-        <ProjectInfoForm info={projectInfo} onChange={handleProjectChange} />
-
-        {/* Window table */}
-        <div className="space-y-2">
-          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-            Window Schedule
-            <span className="ml-2 font-normal text-zinc-400">
-              ({windowItems.length} {windowItems.length === 1 ? "row" : "rows"})
-            </span>
-          </h2>
-          <EditableWindowTable items={windowItems} onChange={handleWindowsChange} />
-        </div>
-
-      </div>
-    </main>
+      </main>
+    </>
   );
 }

@@ -55,3 +55,27 @@ export interface PatchExtractionRequest {
   project_info?: Partial<Omit<ProjectInfo, "detected_file_type" | "detected_relevant_pages">>;
   window_items?: Array<Partial<WindowItem> & { id: string }>;
 }
+
+export interface ConfirmResponse {
+  session_id: string;
+  status: string;
+  next: string;
+}
+
+export interface QuoteRow {
+  tag: string;
+  supplier: string;
+  unit_price: number;
+  quantity: number;
+  estimated_total: number;
+  lead_time_days: number;
+  match_score: number;
+  match_reason: string;
+  risk_notes: string;
+}
+
+export interface RecommendationsResponse {
+  session_id: string;
+  quote_table: QuoteRow[];
+  natural_language_summary: string;
+}
