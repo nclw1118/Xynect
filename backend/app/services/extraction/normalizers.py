@@ -6,9 +6,75 @@ Rules:
 - Append units when the column header implies them (ft, sf).
 - Never invent values — return empty string if value is blank/unparseable.
 - Do not round or alter numeric values beyond stripping whitespace.
+
+Area calculation helpers (parse_dimension_to_feet, calculate_area) are used
+by the extraction agent to fill area deterministically after LLM extraction.
+They must NOT be called for Excel/CSV rows that already have an explicit area
+from the AREA(SF) column.
 """
 
 import re
+
+
+# ── Dimension parsing ──────────────────────────────────────────────────────────
+
+def parse_dimension_to_feet(value: str | None) -> float | None:
+    """
+    Parse a dimension string to a float in feet.
+
+    Handles:
+      "3 ft" / "3 feet" / "3'"       → 3.0
+      "36 in" / "36 inches" / "36\""  → 3.0
+      "3'-6\"" / "3'6\""              → 3.5
+      "3.5" (no unit)                 → None  (ambiguous — refuse to guess)
+      "915 mm"                        → None  (mm not supported in MVP)
+
+    Returns None when units are absent or ambiguous so we never silently
+    assume the wrong unit.
+    """
+    if not value:
+        return None
+    v = value.strip().lower()
+
+    # feet-inches compound: 3'-6", 3'6", 3' 6"
+    m = re.match(r"(\d+)\s*'\s*-?\s*(\d+(?:\.\d+)?)\s*\"?", v)
+    if m:
+        return float(m.group(1)) + float(m.group(2)) / 12.0
+
+    # feet only: 3 ft, 3 feet, 3'
+    m = re.match(r"(\d+(?:\.\d+)?)\s*(?:ft|feet|')\b", v)
+    if m:
+        return float(m.group(1))
+
+    # inches only: 36 in, 36 inches, 36"
+    m = re.match(r"(\d+(?:\.\d+)?)\s*(?:in|inch|inches|\")\b", v)
+    if m:
+        return float(m.group(1)) / 12.0
+
+    # No recognised unit → refuse to assume
+    return None
+
+
+def calculate_area(width: str | None, height: str | None) -> str | None:
+    """
+    Calculate area in square feet from two dimension strings.
+
+    Returns a formatted string like "15.0 sf", or None when:
+    - either dimension is missing
+    - either dimension has no recognised unit
+    - units are mixed or ambiguous
+
+    Never invented, never guessed.
+    """
+    w_ft = parse_dimension_to_feet(width)
+    h_ft = parse_dimension_to_feet(height)
+    if w_ft is None or h_ft is None:
+        return None
+    area_sf = w_ft * h_ft
+    # Format: drop trailing zero if it's a whole number
+    if area_sf == int(area_sf):
+        return f"{int(area_sf)} sf"
+    return f"{area_sf:.2f} sf"
 
 
 def _strip_to_numeric(raw: str) -> str:
