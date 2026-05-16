@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 75
 
     next_public_api_base_url: str = "http://localhost:8000"
+    frontend_url: str = "http://localhost:3000"
 
     openai_api_key: str = ""
     anthropic_api_key: str = ""

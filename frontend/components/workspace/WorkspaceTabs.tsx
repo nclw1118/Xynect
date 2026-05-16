@@ -90,6 +90,7 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
   // ── Quote generation: flush → confirm → fetch ─────────────────────────
   const generateQuote = async (pi: ProjectInfo | null, wi: WindowItem[]) => {
     if (!extractionReady || quoteLoading) return;
+    if (!extraction) return; // wait for TAKE OFF data to load before flushing
 
     setQuoteLoading(true);
     setQuoteError(null);
@@ -200,6 +201,8 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
                   Waiting for extraction to complete…
                 </p>
               </div>
+            ) : !extraction ? (
+              <LoadingSkeleton />
             ) : quoteLoading ? (
               <QuoteLoadingState />
             ) : quoteError ? (
@@ -207,7 +210,9 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
                 error={quoteError}
                 onRetry={() => generateQuote(projectInfo, windowItems)}
               />
-            ) : !recommendations ? null : (
+            ) : !recommendations ? (
+              <QuoteIdleState onGenerate={() => generateQuote(projectInfo, windowItems)} />
+            ) : (
               <>
                 {/* Quote header */}
                 <div className="flex items-center justify-between">
@@ -376,6 +381,22 @@ function QuoteErrorState({
         className="text-sm underline text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
       >
         Try again
+      </button>
+    </div>
+  );
+}
+
+function QuoteIdleState({ onGenerate }: { onGenerate: () => void }) {
+  return (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-10 text-center space-y-4">
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        Extraction data is ready. Generate supplier recommendations from your current window data.
+      </p>
+      <button
+        onClick={onGenerate}
+        className="px-5 py-2 rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-colors"
+      >
+        Generate Recommendations
       </button>
     </div>
   );

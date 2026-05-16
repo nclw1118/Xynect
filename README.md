@@ -110,3 +110,56 @@ storage/        Uploaded files (gitignored)
 docker-compose.yml
 .env.example
 ```
+
+## Deploying to Render (or any hosted environment)
+
+### Backend environment variables
+
+Set these in your Render backend service before deploying:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | Your hosted PostgreSQL connection string |
+| `FRONTEND_URL` | Your deployed frontend URL (e.g. `https://xynect.onrender.com`) — used for CORS |
+| `LLM_PROVIDER` | `stub` for soft release (no API key required) |
+| `UPLOAD_DIR` | `./storage/uploads` (default — see storage note below) |
+
+**`FRONTEND_URL` is required for CORS.** If not set, only `http://localhost:3000` is allowed, which means all browser requests from the deployed frontend will be blocked.
+
+### Frontend environment variables
+
+`NEXT_PUBLIC_API_BASE_URL` is baked into the Next.js bundle **at build time**. Set it in your Render frontend service environment variables before the build runs:
+
+```
+NEXT_PUBLIC_API_BASE_URL=https://your-backend-url.onrender.com
+```
+
+If you forget to set this, the frontend will try to call `http://localhost:8000` from the user's browser and all API requests will fail silently.
+
+### Database setup (run once after first deploy)
+
+These one-off commands must be run before the first request:
+
+```bash
+# 1. Apply database schema
+alembic upgrade head
+
+# 2. Insert fake suppliers
+python -m app.seed.suppliers
+```
+
+On Render, run these as one-off jobs from the Render dashboard (Shell tab or a one-off job).
+
+### File storage on Render
+
+Uploaded files are stored at `./storage/uploads/` on the local filesystem. **Render's filesystem is ephemeral** — files are deleted on every redeploy.
+
+For the soft-release demo:
+- This is acceptable as long as you do not redeploy between uploading a file and generating recommendations.
+- The database session data (extracted rows, recommendations) persists in PostgreSQL and survives restarts.
+
+For production: replace local storage with S3 or an equivalent object store.
+
+### Render cold start
+
+Free-tier Render services sleep after inactivity. The first request after sleep can take 30–60 seconds. The workspace's left panel polling will continue retrying during this window.
