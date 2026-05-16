@@ -43,7 +43,7 @@ export function AgentProgress({ sessionId }: { sessionId: string }) {
 
         if (data.status === "review_ready") {
           if (intervalRef.current) clearInterval(intervalRef.current);
-          router.push(`/review/${sessionId}`);
+          router.push(`/workspace/${sessionId}`);
         } else if (data.status === "error") {
           if (intervalRef.current) clearInterval(intervalRef.current);
           setFatalError("Extraction failed. Please go back and try a different file.");

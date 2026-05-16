@@ -14,6 +14,7 @@ export interface ProgressResponse {
   status: string;
   current_step: string | null;
   steps: ProgressStep[];
+  uploaded_file_name?: string | null;
 }
 
 export interface ProjectInfo {

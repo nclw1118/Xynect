@@ -22,7 +22,7 @@ def confirm_session(session_id: str, db: DBSession = Depends(get_db)) -> Confirm
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    if session.status not in {"review_ready", "confirmed"}:
+    if session.status not in {"review_ready", "confirmed", "recommendation_ready"}:
         raise HTTPException(
             status_code=409,
             detail=f"Session cannot be confirmed from status '{session.status}'.",

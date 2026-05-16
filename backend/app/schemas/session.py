@@ -19,3 +19,4 @@ class ProgressResponse(BaseModel):
     status: str
     current_step: Optional[str]
     steps: list[ProgressStepSchema]
+    uploaded_file_name: Optional[str] = None

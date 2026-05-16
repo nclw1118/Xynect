@@ -67,7 +67,7 @@ export function FileDropzone() {
         method: "POST",
         body: form,
       });
-      router.push(`/processing/${res.session_id}`);
+      router.push(`/workspace/${res.session_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed. Please try again.");
       setUploading(false);
