@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session as DBSession
 
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.progress_step import ProgressStep
 from app.models.project import ProjectInfo
@@ -117,6 +118,28 @@ def _run_spreadsheet(
     db.commit()
 
     return result
+
+
+# ── PDF + OpenAI branch (LangChain crop-planning algorithm) ──────────────────
+
+def _run_pdf_langchain(
+    session_id: str,
+    content: bytes,
+    file_type: str,
+    db: DBSession,
+    base_idx: int,
+) -> ExtractionResult:
+    from app.services.extraction.pdf.config import PDFExtractionConfig
+    from app.services.extraction.pdf.service import (
+        PDFExtractionService,
+        STEP_NAMES_IN_ORDER,
+    )
+    from app.services.extraction.progress_reporter import ProgressReporter
+
+    reporter = ProgressReporter(db, session_id, STEP_NAMES_IN_ORDER, base_idx)
+    config = PDFExtractionConfig.from_settings()
+    service = PDFExtractionService(config)
+    return service.run(content, file_type, session_id, reporter)
 
 
 # ── LLM extraction branch (PDF / image) ──────────────────────────────────────
@@ -274,6 +297,11 @@ def _run(session_id: str, file_path: str, file_type: str, db: DBSession) -> None
 
     if file_type == "spreadsheet":
         result = _run_spreadsheet(session_id, content, file_path, db, existing_count)
+    elif (
+        file_type in ("single_page_pdf", "multi_page_pdf")
+        and settings.llm_provider == "openai"
+    ):
+        result = _run_pdf_langchain(session_id, content, file_type, db, existing_count)
     else:
         result = _run_llm(session_id, content, file_type, db, existing_count)
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import type { WindowItem } from "@/lib/types";
 import { parseDimParts, buildArchValue, calcAreaSf } from "@/lib/unit-utils";
 
@@ -22,7 +23,7 @@ type ColDef = {
   key: keyof WindowItem;
   label: string;
   width: string;
-  type: "text" | "ft-inches" | "area" | "integer" | "numeric" | "readonly";
+  type: "text" | "ft-inches" | "area" | "integer" | "numeric" | "readonly" | "notes";
 };
 
 const COLS: ColDef[] = [
@@ -39,7 +40,7 @@ const COLS: ColDef[] = [
   { key: "vt",           label: "VT",           width: "w-20",  type: "numeric"   },
   { key: "glass_type",   label: "Glass Type",   width: "w-28",  type: "text"      },
   { key: "confidence",   label: "Conf",         width: "w-16",  type: "readonly"  },
-  { key: "notes",        label: "Notes",        width: "w-48",  type: "text"      },
+  { key: "notes",        label: "Notes",        width: "w-48",  type: "notes"     },
 ];
 
 // ── Shared input styles ────────────────────────────────────────────────────────
@@ -109,6 +110,76 @@ function FtInCell({
   );
 }
 
+// ── Notes cell — editable input + hover tooltip (matches QUOTE Risk Notes) ─────
+
+interface TooltipPos { x: number; y: number; }
+
+function NotesCell({
+  colKey,
+  colWidth,
+  value,
+  onCellChange,
+}: {
+  colKey: keyof WindowItem;
+  colWidth: string;
+  value: string;
+  onCellChange: (key: keyof WindowItem, rawVal: string) => void;
+}) {
+  const [pos, setPos] = useState<TooltipPos | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
+  const empty = !value;
+  const showTooltip = pos !== null && !isFocused && !empty;
+
+  return (
+    <td className={`${colWidth} px-1 py-1`}>
+      <div
+        onMouseEnter={(e) => {
+          if (empty) return;
+          const r = e.currentTarget.getBoundingClientRect();
+          setPos({ x: r.left, y: r.top });
+        }}
+        onMouseLeave={() => setPos(null)}
+        className="relative"
+      >
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onCellChange(colKey, e.target.value)}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          placeholder="Missing — optional"
+          className={`w-full ${BASE_INPUT} ${empty ? EMPTY : FILLED} text-ellipsis`}
+        />
+      </div>
+
+      {showTooltip && createPortal(
+        <div
+          style={{
+            position: "fixed",
+            left: Math.min(pos!.x, typeof window !== "undefined" ? window.innerWidth - 308 : pos!.x),
+            top: pos!.y - 10,
+            transform: "translateY(-100%)",
+            zIndex: 9999,
+          }}
+          className="w-72 bg-zinc-900 dark:bg-zinc-50 text-zinc-100 dark:text-zinc-900 text-xs leading-relaxed rounded-xl px-3 py-2.5 shadow-2xl pointer-events-none whitespace-pre-wrap break-words"
+        >
+          {value}
+          <span
+            className="absolute left-4 top-full w-0 h-0"
+            style={{
+              borderLeft: "5px solid transparent",
+              borderRight: "5px solid transparent",
+              borderTop: "5px solid",
+              borderTopColor: "inherit",
+            }}
+          />
+        </div>,
+        document.body
+      )}
+    </td>
+  );
+}
+
 // ── Generic cell ───────────────────────────────────────────────────────────────
 
 function Cell({
@@ -135,6 +206,20 @@ function Cell({
       <td className={`${col.width} px-2 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap`}>
         {String(item[col.key] ?? "")}
       </td>
+    );
+  }
+
+  // ── Notes — editable + hover tooltip ──
+  if (col.type === "notes") {
+    const raw = item[col.key];
+    const value = raw !== null && raw !== undefined ? String(raw) : "";
+    return (
+      <NotesCell
+        colKey={col.key}
+        colWidth={col.width}
+        value={value}
+        onCellChange={onCellChange}
+      />
     );
   }
 
