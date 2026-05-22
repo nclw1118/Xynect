@@ -1,37 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import type { WindowItem } from "@/lib/types";
+import { parseDimParts, buildArchValue, calcAreaSf } from "@/lib/unit-utils";
 
 interface Props {
   items: WindowItem[];
   onChange: (updated: WindowItem[]) => void;
-}
-
-// ── Dimension helpers ──────────────────────────────────────────────────────────
-
-/** Parse any dimension string to a number in inches, return null if unparseable. */
-function toInches(s: string | null | undefined): number | null {
-  if (!s) return null;
-  const v = s.trim().toLowerCase();
-  // feet-inches compound: 3'-6", 3'6"
-  const compound = v.match(/^([\d.]+)\s*'\s*-?\s*([\d.]+)/);
-  if (compound) return parseFloat(compound[1]) * 12 + parseFloat(compound[2]);
-  // feet: 3 ft, 3.5 ft, 3'
-  const ft = v.match(/^([\d.]+)\s*(?:ft|feet|')\b/);
-  if (ft) return parseFloat(ft[1]) * 12;
-  // inches or bare number
-  const num = v.match(/^([\d.]+)/);
-  if (num) return parseFloat(num[1]);
-  return null;
-}
-
-/** Extract the numeric portion of a dimension for display (in the "in" input). */
-function displayInches(s: string | null | undefined): string {
-  const inches = toInches(s);
-  if (inches === null) return "";
-  // Round to 4 sig figs to avoid floating-point noise (e.g. 12.000000000000002)
-  const rounded = parseFloat(inches.toFixed(4));
-  return String(rounded);
 }
 
 /** Extract the numeric portion for unitless numeric fields (u_value, shgc, vt, quantity). */
@@ -41,48 +16,100 @@ function displayNumeric(s: string | null | undefined): string {
   return m ? m[1] : "";
 }
 
-/** Auto-calculate area in sf from two dimension strings. */
-function calcAreaSf(w: string | null | undefined, h: string | null | undefined): string | null {
-  const wIn = toInches(w);
-  const hIn = toInches(h);
-  if (wIn === null || hIn === null) return null;
-  const sf = (wIn / 12) * (hIn / 12);
-  const rounded = parseFloat(sf.toFixed(4));
-  return rounded === Math.floor(rounded) ? `${Math.floor(rounded)} sf` : `${rounded.toFixed(2)} sf`;
-}
-
 // ── Column definitions ─────────────────────────────────────────────────────────
 
 type ColDef = {
   key: keyof WindowItem;
   label: string;
   width: string;
-  type: "text" | "inches" | "area" | "integer" | "numeric" | "readonly";
+  type: "text" | "ft-inches" | "area" | "integer" | "numeric" | "readonly";
 };
 
 const COLS: ColDef[] = [
-  { key: "tag",          label: "Tag",          width: "w-20",  type: "text"     },
-  { key: "material_type",label: "Type",         width: "w-20",  type: "readonly" },
-  { key: "width",        label: "Width",        width: "w-28",  type: "inches"   },
-  { key: "height",       label: "Height",       width: "w-28",  type: "inches"   },
-  { key: "area",         label: "Area",         width: "w-24",  type: "area"     },
-  { key: "quantity",     label: "Qty",          width: "w-20",  type: "integer"  },
-  { key: "opening_type", label: "Opening Type", width: "w-32",  type: "text"     },
-  { key: "material",     label: "Material",     width: "w-28",  type: "text"     },
-  { key: "u_value",      label: "U-Value",      width: "w-22",  type: "numeric"  },
-  { key: "shgc",         label: "SHGC",         width: "w-20",  type: "numeric"  },
-  { key: "vt",           label: "VT",           width: "w-20",  type: "numeric"  },
-  { key: "glass_type",   label: "Glass Type",   width: "w-28",  type: "text"     },
-  { key: "confidence",   label: "Conf",         width: "w-16",  type: "readonly" },
-  { key: "notes",        label: "Notes",        width: "w-48",  type: "text"     },
+  { key: "tag",          label: "Tag",          width: "w-20",  type: "text"      },
+  { key: "material_type",label: "Type",         width: "w-20",  type: "readonly"  },
+  { key: "width",        label: "Width",        width: "w-28",  type: "ft-inches" },
+  { key: "height",       label: "Height",       width: "w-28",  type: "ft-inches" },
+  { key: "area",         label: "Area",         width: "w-24",  type: "area"      },
+  { key: "quantity",     label: "Qty",          width: "w-20",  type: "integer"   },
+  { key: "opening_type", label: "Opening Type", width: "w-32",  type: "text"      },
+  { key: "material",     label: "Material",     width: "w-28",  type: "text"      },
+  { key: "u_value",      label: "U-Value",      width: "w-22",  type: "numeric"   },
+  { key: "shgc",         label: "SHGC",         width: "w-20",  type: "numeric"   },
+  { key: "vt",           label: "VT",           width: "w-20",  type: "numeric"   },
+  { key: "glass_type",   label: "Glass Type",   width: "w-28",  type: "text"      },
+  { key: "confidence",   label: "Conf",         width: "w-16",  type: "readonly"  },
+  { key: "notes",        label: "Notes",        width: "w-48",  type: "text"      },
 ];
 
-// ── Cell components ────────────────────────────────────────────────────────────
+// ── Shared input styles ────────────────────────────────────────────────────────
 
 const BASE_INPUT =
   "rounded px-2 py-1 text-xs outline-none transition-colors focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500";
 const FILLED = "bg-transparent border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700 text-zinc-900 dark:text-zinc-100";
-const EMPTY = "bg-amber-50 border border-amber-200 placeholder:text-amber-400 dark:bg-amber-900/20 dark:border-amber-700 dark:placeholder:text-amber-600 text-zinc-400";
+const EMPTY  = "bg-amber-50 border border-amber-200 placeholder:text-amber-400 dark:bg-amber-900/20 dark:border-amber-700 dark:placeholder:text-amber-600 text-zinc-400";
+const SPIN   = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
+
+// ── Feet + inches cell ─────────────────────────────────────────────────────────
+
+function FtInCell({
+  colKey,
+  colWidth,
+  stored,
+  onCellChange,
+}: {
+  colKey: "width" | "height";
+  colWidth: string;
+  stored: string | null;
+  onCellChange: (key: "width" | "height", rawVal: string) => void;
+}) {
+  const parts = parseDimParts(stored);
+  const [ftStr, setFtStr] = useState(parts !== null ? String(parts.ft) : "");
+  const [inStr, setInStr] = useState(parts !== null ? String(parts.inches) : "");
+  const empty = ftStr === "" && inStr === "";
+
+  const commit = (ft: string, inches: string) => {
+    onCellChange(colKey, buildArchValue(ft, inches) ?? "");
+  };
+
+  const unitCls = `text-xs leading-none shrink-0 pr-1 ${empty ? "text-amber-400 dark:text-amber-600" : "text-zinc-400 dark:text-zinc-500"}`;
+
+  return (
+    <td className={`${colWidth} px-1 py-1`}>
+      <div className="flex items-center">
+        <input
+          type="number"
+          min="0"
+          step="1"
+          value={ftStr}
+          onChange={(e) => {
+            setFtStr(e.target.value);
+            commit(e.target.value, inStr);
+          }}
+          placeholder="—"
+          className={`w-9 ${BASE_INPUT} ${empty ? EMPTY : FILLED} ${SPIN}`}
+        />
+        <span className={unitCls}>′</span>
+        <input
+          type="number"
+          min="0"
+          max="11.99"
+          step="0.01"
+          value={inStr}
+          onChange={(e) => {
+            setInStr(e.target.value);
+            commit(ftStr, e.target.value);
+          }}
+          placeholder="—"
+          className={`w-9 ${BASE_INPUT} ${empty ? EMPTY : FILLED} ${SPIN}`}
+        />
+        <span className={unitCls}>″</span>
+      </div>
+    </td>
+  );
+}
+
+// ── Generic cell ───────────────────────────────────────────────────────────────
 
 function Cell({
   col,
@@ -111,27 +138,15 @@ function Cell({
     );
   }
 
-  // ── Width / Height — numeric input + "in" unit ──
-  if (col.type === "inches") {
-    const display = displayInches(item[col.key] as string | null);
-    const empty = !display;
+  // ── Width / Height — ft + inches inputs ──
+  if (col.type === "ft-inches") {
     return (
-      <td className={`${col.width} px-1 py-1`}>
-        <div className="flex items-center gap-1">
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={display}
-            onChange={(e) => onCellChange(col.key, e.target.value)}
-            placeholder="—"
-            className={`w-16 ${BASE_INPUT} ${empty ? EMPTY : FILLED} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
-          />
-          <span className={`text-xs shrink-0 ${empty ? "text-amber-400 dark:text-amber-600" : "text-zinc-400 dark:text-zinc-500"}`}>
-            in
-          </span>
-        </div>
-      </td>
+      <FtInCell
+        colKey={col.key as "width" | "height"}
+        colWidth={col.width}
+        stored={item[col.key] as string | null}
+        onCellChange={onCellChange as (key: "width" | "height", rawVal: string) => void}
+      />
     );
   }
 
@@ -167,7 +182,7 @@ function Cell({
           value={display}
           onChange={(e) => onCellChange(col.key, e.target.value)}
           placeholder="—"
-          className={`w-full ${BASE_INPUT} ${empty ? EMPTY : FILLED} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+          className={`w-full ${BASE_INPUT} ${empty ? EMPTY : FILLED} ${SPIN}`}
         />
       </td>
     );
@@ -187,7 +202,7 @@ function Cell({
           value={display}
           onChange={(e) => onCellChange(col.key, e.target.value)}
           placeholder="—"
-          className={`w-full ${BASE_INPUT} ${empty ? EMPTY : FILLED} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+          className={`w-full ${BASE_INPUT} ${empty ? EMPTY : FILLED} ${SPIN}`}
         />
       </td>
     );
@@ -218,8 +233,8 @@ export function EditableWindowTable({ items, onChange }: Props) {
     const updates: Partial<WindowItem> = {};
 
     if (key === "width" || key === "height") {
-      // Store as "N in" so backend helpers (parse_dimension_to_feet, _to_inches) resolve correctly
-      updates[key] = rawVal ? `${rawVal} in` : null;
+      // rawVal is already architectural notation like "3'-6"" or ""
+      updates[key] = rawVal || null;
       const newWidth  = key === "width"  ? updates[key] : item.width;
       const newHeight = key === "height" ? updates[key] : item.height;
       updates.area = calcAreaSf(newWidth, newHeight) ?? item.area ?? null;
@@ -245,7 +260,7 @@ export function EditableWindowTable({ items, onChange }: Props) {
   if (items.length === 0)
     return (
       <p className="text-sm text-zinc-400 text-center py-8">
-        No window items extracted. Click "+ Add Window" to add one manually.
+        No window items extracted. Click &ldquo;+ Add Window&rdquo; to add one manually.
       </p>
     );
 

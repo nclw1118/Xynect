@@ -88,6 +88,26 @@ export function ProjectInfoForm({ info, onChange }: Props) {
 
         <Field label="Zip Code" value={info?.zip_code ?? null} onChange={emit("zip_code")} />
         <Field label="Detected File Type" value={info?.detected_file_type ?? null} readOnly />
+
+        {/* Building Code — static, read-only */}
+        <div className="flex flex-col gap-1 sm:col-span-2">
+          <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+            Building Code
+          </label>
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-zinc-700 dark:text-zinc-300 flex-1">
+              Compliance with NFRC Requirements and COMCheck
+            </p>
+            <a
+              href="https://comcheck.energycode.pnl.gov/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 rounded-xl bg-emerald-600 dark:bg-emerald-500 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 dark:hover:bg-emerald-400 shadow-sm transition-colors whitespace-nowrap"
+            >
+              Open COMCheck ↗
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   );
