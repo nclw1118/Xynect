@@ -9,11 +9,13 @@ import type {
   WindowItem,
 } from "@/lib/types";
 import { RecommendationSummary } from "@/components/RecommendationSummary";
+import { ProjectInfoForm } from "@/components/ProjectInfoForm";
 import { MaterialSection } from "./MaterialSection";
 import { ExportControls } from "./ExportControls";
 import { QuoteMaterialSection } from "./QuoteMaterialSection";
+import { VendorInfoTab } from "./VendorInfoTab";
 
-type Tab = "takeoff" | "quote";
+type Tab = "takeoff" | "quote" | "vendor";
 
 interface Props {
   sessionId: string;
@@ -150,6 +152,9 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
           <TabButton active={activeTab === "quote"} onClick={handleQuoteTabClick}>
             QUOTE
           </TabButton>
+          <TabButton active={activeTab === "vendor"} onClick={() => setActiveTab("vendor")}>
+            VENDOR INFO
+          </TabButton>
 
           {/* Save status */}
           <div className="ml-auto flex items-center gap-2 pb-2.5 text-xs">
@@ -179,15 +184,16 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
             ) : !extraction ? (
               <LoadingSkeleton />
             ) : (
-              <MaterialSection
-                sessionId={sessionId}
-                projectInfo={projectInfo}
-                windowItems={windowItems}
-                warnings={extraction.warnings}
-                onProjectChange={handleProjectChange}
-                onWindowsChange={handleWindowsChange}
-                onAddWindow={handleAddWindow}
-              />
+              <div className="space-y-4">
+                <ProjectInfoForm info={projectInfo} onChange={handleProjectChange} />
+                <MaterialSection
+                  sessionId={sessionId}
+                  windowItems={windowItems}
+                  warnings={extraction.warnings}
+                  onWindowsChange={handleWindowsChange}
+                  onAddWindow={handleAddWindow}
+                />
+              </div>
             )}
           </div>
         )}
@@ -250,6 +256,16 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
                 />
               </>
             )}
+          </div>
+        )}
+
+        {/* ── VENDOR INFO tab ── */}
+        {activeTab === "vendor" && (
+          <div className="px-6 py-6">
+            <VendorInfoTab
+              recommendations={recommendations}
+              onSwitchToQuote={handleQuoteTabClick}
+            />
           </div>
         )}
 

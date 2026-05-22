@@ -3,26 +3,21 @@
 import { useState } from "react";
 import { AppWindow, DoorOpen, Layers, Plus, ChevronDown } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import type { ProjectInfo, WindowItem } from "@/lib/types";
-import { ProjectInfoForm } from "@/components/ProjectInfoForm";
+import type { WindowItem } from "@/lib/types";
 import { EditableWindowTable } from "@/components/EditableWindowTable";
 
 interface Props {
   sessionId: string;
-  projectInfo: ProjectInfo | null;
   windowItems: WindowItem[];
   warnings: string[];
-  onProjectChange: (updated: Partial<ProjectInfo>) => void;
   onWindowsChange: (updated: WindowItem[]) => void;
   onAddWindow: (newItem: WindowItem) => void;
 }
 
 export function MaterialSection({
   sessionId,
-  projectInfo,
   windowItems,
   warnings,
-  onProjectChange,
   onWindowsChange,
   onAddWindow,
 }: Props) {
@@ -91,9 +86,6 @@ export function MaterialSection({
                 ))}
               </div>
             )}
-
-            {/* Project info */}
-            <ProjectInfoForm info={projectInfo} onChange={onProjectChange} />
 
             {/* Window schedule + Add Window */}
             <div className="space-y-3">
