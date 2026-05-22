@@ -1,7 +1,13 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, init);
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "ngrok-skip-browser-warning": "true",
+      ...init?.headers,
+    },
+  });
   if (!res.ok) {
     // Extract FastAPI's `detail` field when available; fall back to raw text.
     let message = `Request failed (${res.status})`;
