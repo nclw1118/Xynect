@@ -1,0 +1,10 @@
+# Keep the build context small and reproducible.
+.venv/
+__pycache__/
+*.pyc
+storage/
+.env
+.env.*
+!.env.example
+Dockerfile
+.dockerignore

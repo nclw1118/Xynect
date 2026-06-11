@@ -1,0 +1,11 @@
+# Keep the build context small; node_modules and .next are rebuilt in-image.
+node_modules/
+.next/
+out/
+build/
+.env
+.env.*
+npm-debug.log*
+.DS_Store
+Dockerfile
+.dockerignore
