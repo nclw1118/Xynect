@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -98,7 +99,7 @@ def patch_extraction(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    if session.status not in {"review_ready", "confirmed"}:
+    if session.status not in {"review_ready", "confirmed", "recommendation_ready"}:
         raise HTTPException(
             status_code=409,
             detail=f"Cannot edit extraction in status: {session.status}",
@@ -140,3 +141,47 @@ def patch_extraction(
 
     db.commit()
     return PatchExtractionResponse(session_id=session_id, status="saved")
+
+
+@router.post("/{session_id}/windows", response_model=WindowItemSchema)
+def add_window(session_id: str, db: DBSession = Depends(get_db)) -> WindowItemSchema:
+    session = db.query(Session).filter(Session.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    if session.status not in {"review_ready", "confirmed", "recommendation_ready"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot add window in session status: {session.status}",
+        )
+
+    item = WindowItem(
+        id=str(uuid.uuid4()),
+        session_id=session_id,
+        material_type="Window",
+        confidence=0.0,
+        notes="Manually added by user",
+        original_extraction={},
+        user_edits={},
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    return WindowItemSchema(
+        id=item.id,
+        tag=item.tag,
+        material_type=item.material_type,
+        width=item.width,
+        height=item.height,
+        area=item.area,
+        quantity=item.quantity,
+        opening_type=item.opening_type,
+        material=item.material,
+        u_value=item.u_value,
+        shgc=item.shgc,
+        vt=item.vt,
+        glass_type=item.glass_type,
+        confidence=item.confidence,
+        notes=item.notes,
+    )

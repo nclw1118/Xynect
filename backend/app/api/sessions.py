@@ -126,4 +126,5 @@ def get_progress(session_id: str, db: DBSession = Depends(get_db)) -> ProgressRe
         status=session.status,
         current_step=current_step,
         steps=[ProgressStepSchema(name=s.name, status=s.status) for s in steps],
+        uploaded_file_name=session.uploaded_file_name,
     )
