@@ -24,6 +24,7 @@ from app.models.session import Session
 from app.models.window_item import WindowItem
 from app.services.extraction.normalizers import calculate_area
 from app.services.extraction.spreadsheet_parser import ExtractionResult, parse_spreadsheet
+from app.services.gcs_archive import archive_session_artifacts
 
 
 # ── Progress helpers ──────────────────────────────────────────────────────────
@@ -334,6 +335,13 @@ def run_extraction(session_id: str, file_path: str, file_type: str) -> None:
             if session:
                 session.status = "review_ready"
                 db.commit()
+
+            # ── Stage 5A: hybrid local + GCS archival ────────────────────
+            # Runs only AFTER extraction finished and results are committed.
+            # Local disk stays the working copy; this is a durable copy only.
+            # Best-effort: archive_session_artifacts never raises, so a GCS
+            # failure cannot change the session's success status above.
+            archive_session_artifacts(session_id, file_path)
         except Exception as exc:
             db.rollback()
             session = db.query(Session).filter(Session.id == session_id).first()

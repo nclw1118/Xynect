@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     llm_provider: str = "stub"
     llm_model: str = "gpt-4.1"
 
+    # ── Stage 5A: hybrid local + GCS archival ────────────────────────────
+    # Local disk remains the working copy for upload + extraction. When
+    # enabled, copies of the original upload and extraction debug artifacts
+    # are pushed to GCS *after* extraction completes (durable archive only,
+    # never the source of truth at this stage).
+    gcs_enabled: bool = False
+    gcs_bucket_name: str = ""
+    gcs_upload_prefix: str = "uploads"
+    gcs_debug_prefix: str = "extraction_debug"
+    gcs_upload_after_extraction: bool = True
+
     # PDF extraction tuning (LangChain crop-planning algorithm)
     pdf_render_dpi: int = 150
     pdf_crop_dpi: int = 150
