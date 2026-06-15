@@ -43,6 +43,8 @@ class CropPlanResponse(BaseModel):
 
 
 class ExtractedScheduleRow(BaseModel):
+    """A single window/opening/glazing schedule row."""
+
     tag: str
     material_type: str
     width: str
@@ -59,6 +61,27 @@ class ExtractedScheduleRow(BaseModel):
     notes: str
 
 
+class ExtractedDoorRow(BaseModel):
+    """A single door schedule row.
+
+    No `area` field on purpose: door area is recomputed deterministically from
+    width/height after extraction (the LLM must not compute area). NFRC fields
+    (u_value/shgc/vt) are window-specific and intentionally omitted for doors.
+    """
+
+    tag: str
+    opening_type: str
+    quantity: str
+    width: str
+    height: str
+    material: str
+    fire_rating: str
+    self_closing: str
+    glass_type: str
+    notes: str
+    confidence: float
+
+
 class ExtractionPageClassification(BaseModel):
     contains_schedule: bool
     schedule_type: str
@@ -69,7 +92,8 @@ class ExtractionPageClassification(BaseModel):
 class ExtractionPageResponse(BaseModel):
     page_number: int
     page_classification: ExtractionPageClassification
-    extracted_rows: List[ExtractedScheduleRow]
+    window_rows: List[ExtractedScheduleRow]
+    door_rows: List[ExtractedDoorRow]
     warnings: List[str]
 
 

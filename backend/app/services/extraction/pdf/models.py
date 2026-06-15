@@ -81,7 +81,8 @@ class LLMPageResult:
     schedule_type: str
     confidence: float
     reason: str
-    extracted_rows: List[Dict[str, Any]]
+    extracted_rows: List[Dict[str, Any]]  # window/opening/glazing rows
+    extracted_door_rows: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     raw_response: Dict[str, Any] = field(default_factory=dict)
 
@@ -102,4 +103,5 @@ class PDFExtractionArtifacts:
     extracted_window_rows: List[Dict[str, Any]]
     warnings: List[str]
     debug_trace: Dict[str, Any]
+    extracted_door_rows: List[Dict[str, Any]] = field(default_factory=list)
     project_info: Dict[str, Any] = field(default_factory=dict)

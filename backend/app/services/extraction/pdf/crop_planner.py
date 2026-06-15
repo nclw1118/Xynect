@@ -44,13 +44,16 @@ You receive:
 2. One full-page high-resolution image of the same PDF page.
 
 Your jobs:
-A. Decide whether this page actually contains a window/opening/glazing/fenestration schedule or a relevant mixed door/window schedule.
+A. Decide whether this page actually contains a window/opening/glazing/fenestration schedule, a door schedule, or a combined window/door schedule.
 B. Decide whether the full-page image is readable enough to extract the table accurately without cropping.
 C. If it is NOT readable enough, propose one or more crop regions using normalized coordinates.
 
+Treat window schedules, door schedules, and combined window/door schedules as relevant (contains_schedule=true). Wall/floor/roof assembly schedules and detail diagrams are NOT relevant.
+
 Important:
-- Only propose crops if this page is actually relevant.
+- Only propose crops if this page is actually relevant (a window and/or door schedule).
 - Do not crop irrelevant pages.
+- For a combined schedule, the crop should generously include both the window and door portions of the table.
 - Do not extract schedule rows here. This is only crop planning.
 - Use normalized coordinates [x0, y0, x1, y1].
 - x0/y0 are top-left; x1/y1 are bottom-right.

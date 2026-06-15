@@ -250,11 +250,12 @@ class PDFExtractionService:
             progress.start(STEP_NORMALIZE)
             normalizer = PDFRowNormalizer()
             extracted_rows = normalizer.merge_and_normalize(llm_results)
+            extracted_door_rows = normalizer.merge_and_normalize_doors(llm_results)
 
             # Apply deterministic area calculation (same policy as existing flow:
-            # area is never trusted from the LLM).
+            # area is never trusted from the LLM). Applied to both windows and doors.
             from app.services.extraction.normalizers import calculate_area
-            for row in extracted_rows:
+            for row in extracted_rows + extracted_door_rows:
                 if not row.get("area"):
                     computed = calculate_area(row.get("width"), row.get("height"))
                     if computed:
@@ -333,6 +334,7 @@ class PDFExtractionService:
                     "confidence": r.confidence,
                     "reason": r.reason,
                     "rows_extracted": len(r.extracted_rows),
+                    "door_rows_extracted": len(r.extracted_door_rows),
                     "warnings": r.warnings,
                     "raw_response": r.raw_response,
                 }
@@ -350,6 +352,7 @@ class PDFExtractionService:
             debug_trace["crop_render_pages"] = [cr.page_number for cr in crop_renders]
             debug_trace["llm_page_numbers"] = [r.page_number for r in llm_results]
             debug_trace["rows_extracted_count"] = len(extracted_rows)
+            debug_trace["door_rows_extracted_count"] = len(extracted_door_rows)
             debug_trace["project_info_page_numbers"] = [p.page_number for p in project_info_pages]
 
             project_info_artifact: Dict = {
@@ -370,6 +373,7 @@ class PDFExtractionService:
                 crop_renders=crop_renders_dict,
                 llm_results=llm_results_dict,
                 extracted_window_rows=extracted_rows,
+                extracted_door_rows=extracted_door_rows,
                 warnings=warnings,
                 debug_trace=debug_trace,
                 project_info=project_info_artifact,
@@ -403,7 +407,8 @@ class PDFExtractionService:
                 f"{debug_trace['crop_render_pages']}"
             )
             log_debug(f"LLM final extraction pages: {debug_trace['llm_page_numbers']}")
-            log_debug(f"Rows extracted: {len(extracted_rows)}")
+            log_debug(f"Window rows extracted: {len(extracted_rows)}")
+            log_debug(f"Door rows extracted: {len(extracted_door_rows)}")
             if warnings:
                 log_debug(f"Warnings: {warnings}")
 
@@ -413,6 +418,7 @@ class PDFExtractionService:
 
             return ExtractionResult(
                 window_rows=extracted_rows,
+                door_rows=extracted_door_rows,
                 warnings=warnings,
                 project_info=project_info_dict,
             )

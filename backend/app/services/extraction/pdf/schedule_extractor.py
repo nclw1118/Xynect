@@ -86,15 +86,22 @@ You receive:
 {image_instructions}
 
 Your task:
-A. Decide whether this page contains a window/opening/glazing/fenestration schedule or schedule-like table relevant to windows/openings.
-B. If it does, extract ONLY window rows into the normalized Xynect schema.
-C. If it does not, return contains_schedule=false and extracted_rows=[].
+A. Decide whether this page contains a window schedule, a door schedule, or a combined window/door schedule (or any schedule-like table relevant to windows/openings or doors).
+B. If it does, extract window rows into window_rows and door rows into door_rows, keeping the two lists completely separate.
+C. If it does not, return contains_schedule=false, window_rows=[], and door_rows=[].
 
-CRITICAL — WINDOWS ONLY:
-- Extract ONLY window, glazing, fenestration, and opening rows.
-- COMPLETELY IGNORE any door entries, door rows, or door-only schedules. Do not include them in extracted_rows under any circumstances.
-- If a schedule mixes doors and windows, silently skip every door row and extract only the window/glazing rows.
-- A door-only schedule should be treated as if the page contains no relevant schedule at all.
+WINDOWS AND DOORS — KEEP SEPARATE:
+- Extract window, glazing, fenestration, and opening rows into window_rows ONLY.
+- Extract door rows (interior doors, exterior doors, any door schedule) into door_rows ONLY.
+- Never place a door in window_rows, and never place a window in door_rows.
+- If a single schedule table mixes doors and windows, split the rows: windows → window_rows, doors → door_rows.
+- If the page contains both a WINDOW SCHEDULE and a DOOR SCHEDULE, extract both into their respective lists.
+
+IGNORE these entirely (do not extract as windows OR doors):
+- Wall schedules, wall types, and interior/exterior wall assemblies.
+- Floor schedules, slab/floor assemblies, and floor finishes.
+- Roof/ceiling assemblies and any other non-opening assembly schedules.
+- Detail diagrams, legends, and general specifications.
 
 Important rules:
 - This document may contain typos, OCR errors, or inconsistent formatting. If you detect ambiguity or conflicting information during extraction, use your best judgment to resolve it and record a brief explanation in the notes field for that row.
@@ -103,14 +110,14 @@ Important rules:
 - Use full-page image for context.
 - Do not hallucinate. Extract only values explicitly visible in the native text or images.
 - If a field is absent, return an empty string.
-- Preserve tag labels exactly as shown, such as W1, W-1, W01, A, B, etc.
+- Preserve tag labels exactly as shown, such as W1, W-1, W01, D1, D-1, A, B, etc.
 - Prefer actual schedule table values over notes, legends, or general specifications.
-- Elevation pages are usually not schedule pages. Only extract from an elevation if it clearly contains tabular window/opening schedule information.
-- Width/height may appear as FT/IN, inches, feet, or architectural notation. Preserve the visible representation.
-- Quantity may be shown as QTY, COUNT, NO., or repeated tag rows. Extract explicit quantity only. Do not count windows from drawings.
-- U-value may also appear as U-factor. Map it to u_value.
-- SHGC, VT, glass type, frame/material, opening type should be extracted when explicitly available.
-- Area can be extracted if explicitly listed, but do not calculate area yourself in this LLM output.
+- Elevation and floor-plan pages are usually not schedule pages. Do NOT infer or count window/door quantities from floor plans or elevations.
+- Transcribe width/height verbatim as shown (FT/IN, inches, feet, or architectural notation). Preserve the visible representation; do not convert units.
+- Quantity may be shown as QTY, COUNT, NO., or repeated tag rows. Extract explicit quantity only. Do not count openings from drawings.
+- Do NOT compute area in this output. Area is recomputed deterministically downstream. (Windows may carry an explicit area string only if the schedule lists one; door rows have no area field at all.)
+- For windows: U-value may also appear as U-factor (map to u_value); SHGC, VT, glass type, frame/material, and opening type should be extracted when explicitly available.
+- For doors: extract fire_rating (e.g. "20 MIN", "45 MIN", "90 MIN", or "" if none), self_closing (e.g. "YES"/"NO" or "" if not stated), material, glass_type, and opening_type when explicitly available. Doors have no U-value/SHGC/VT.
 - Confidence should reflect how certain you are that the row values were read correctly.
 
 Classification labels:
@@ -202,7 +209,8 @@ class PDFScheduleExtractor:
                 image_data_uris=image_uris,
             )
 
-            parsed_rows = [row.model_dump() for row in response.extracted_rows]
+            parsed_rows = [row.model_dump() for row in response.window_rows]
+            parsed_door_rows = [row.model_dump() for row in response.door_rows]
             classification = response.page_classification
 
             result = LLMPageResult(
@@ -212,6 +220,7 @@ class PDFScheduleExtractor:
                 confidence=classification.confidence,
                 reason=classification.reason,
                 extracted_rows=parsed_rows,
+                extracted_door_rows=parsed_door_rows,
                 warnings=response.warnings,
                 raw_response=response.model_dump(),
             )
@@ -219,7 +228,8 @@ class PDFScheduleExtractor:
 
             log_debug(
                 f"Extraction result page {result.page_number}: contains_schedule={result.contains_schedule}, "
-                f"schedule_type={result.schedule_type}, confidence={result.confidence}, rows={len(result.extracted_rows)}"
+                f"schedule_type={result.schedule_type}, confidence={result.confidence}, "
+                f"window_rows={len(result.extracted_rows)}, door_rows={len(result.extracted_door_rows)}"
             )
             log_debug(f"  reason={result.reason}")
             if result.warnings:
