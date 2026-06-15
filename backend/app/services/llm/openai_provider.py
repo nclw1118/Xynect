@@ -121,6 +121,22 @@ def _image_part(b64: str) -> dict:
     }
 
 
+def _supports_custom_temperature(model: str) -> bool:
+    """Whether `model` accepts a non-default `temperature`.
+
+    Reasoning-class models reject anything other than the default temperature=1
+    (e.g. gpt-5 non-chat, o1/o3/o4) and 400 if a value like 0 is sent. This
+    mirrors the guard LangChain's ChatOpenAI applies on the PDF path so the raw
+    SDK call here behaves the same instead of erroring.
+    """
+    m = model.lower()
+    if m.startswith(("o1", "o3", "o4")):
+        return False
+    if m.startswith("gpt-5") and "chat" not in m:
+        return False
+    return True
+
+
 def _call_with_retry(
     client: OpenAI,
     model: str,
@@ -138,13 +154,18 @@ def _call_with_retry(
         {"role": "user", "content": content_parts},
     ]
 
+    create_kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "response_format": {"type": "json_object"},
+    }
+    # Only send temperature=0 to models that support a custom value; reasoning
+    # models reject it and must use their default.
+    if _supports_custom_temperature(model):
+        create_kwargs["temperature"] = 0
+
     for attempt in range(2):
-        resp = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
+        resp = client.chat.completions.create(**create_kwargs)
         raw = resp.choices[0].message.content or ""
         cleaned = _strip_json_fences(raw)
 
