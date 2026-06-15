@@ -45,16 +45,36 @@ export interface WindowItem {
   notes: string | null;
 }
 
+export interface DoorItem {
+  id: string;
+  tag: string | null;
+  material_type: string;
+  width: string | null;
+  height: string | null;
+  area: string | null;
+  quantity: string | null;
+  opening_type: string | null;
+  material: string | null;
+  fire_rating: string | null;
+  self_closing: string | null;
+  glass_type: string | null;
+  confidence: number;
+  notes: string | null;
+}
+
 export interface ExtractionResponse {
   session_id: string;
   project_info: ProjectInfo | null;
   window_items: WindowItem[];
+  // Optional for backward-compat with older backends; defaults to [] in the UI.
+  door_items?: DoorItem[];
   warnings: string[];
 }
 
 export interface PatchExtractionRequest {
   project_info?: Partial<Omit<ProjectInfo, "detected_file_type" | "detected_relevant_pages">>;
   window_items?: Array<Partial<WindowItem> & { id: string }>;
+  door_items?: Array<Partial<DoorItem> & { id: string }>;
 }
 
 export interface ConfirmResponse {

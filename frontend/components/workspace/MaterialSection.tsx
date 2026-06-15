@@ -3,30 +3,40 @@
 import { useState } from "react";
 import { AppWindow, DoorOpen, Layers, Plus, ChevronDown } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import type { WindowItem } from "@/lib/types";
+import type { WindowItem, DoorItem } from "@/lib/types";
 import { EditableWindowTable } from "@/components/EditableWindowTable";
+import { EditableDoorTable } from "@/components/EditableDoorTable";
 
 interface Props {
   sessionId: string;
   windowItems: WindowItem[];
+  doorItems: DoorItem[];
   warnings: string[];
   onWindowsChange: (updated: WindowItem[]) => void;
   onAddWindow: (newItem: WindowItem) => void;
+  onDoorsChange: (updated: DoorItem[]) => void;
+  onAddDoor: (newItem: DoorItem) => void;
 }
 
 export function MaterialSection({
   sessionId,
   windowItems,
+  doorItems,
   warnings,
   onWindowsChange,
   onAddWindow,
+  onDoorsChange,
+  onAddDoor,
 }: Props) {
   const [windowsOpen, setWindowsOpen] = useState(true);
-  const [doorsOpen, setDoorsOpen] = useState(false);
+  const [doorsOpen, setDoorsOpen] = useState(doorItems.length > 0);
   const [wallsOpen, setWallsOpen] = useState(false);
 
   const [addingWindow, setAddingWindow] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+
+  const [addingDoor, setAddingDoor] = useState(false);
+  const [addDoorError, setAddDoorError] = useState<string | null>(null);
 
   const handleAddWindow = async () => {
     setAddingWindow(true);
@@ -41,6 +51,23 @@ export function MaterialSection({
       setAddError(err instanceof Error ? err.message : "Failed to add window.");
     } finally {
       setAddingWindow(false);
+    }
+  };
+
+  const handleAddDoor = async () => {
+    setAddingDoor(true);
+    setAddDoorError(null);
+    try {
+      const newItem = await apiFetch<DoorItem>(
+        `/api/sessions/${sessionId}/doors`,
+        { method: "POST" }
+      );
+      onAddDoor(newItem);
+      setDoorsOpen(true);
+    } catch (err) {
+      setAddDoorError(err instanceof Error ? err.message : "Failed to add door.");
+    } finally {
+      setAddingDoor(false);
     }
   };
 
@@ -123,27 +150,54 @@ export function MaterialSection({
         <button
           type="button"
           onClick={() => setDoorsOpen((o) => !o)}
-          className="w-full flex items-center gap-3 px-5 py-4 bg-zinc-50 dark:bg-zinc-900/60 hover:bg-zinc-100/60 dark:hover:bg-zinc-900/80 transition-colors text-left"
+          className="w-full flex items-center gap-3 px-5 py-4 bg-zinc-50 dark:bg-zinc-900/60 hover:bg-zinc-100 dark:hover:bg-zinc-900/80 transition-colors text-left"
         >
-          <DoorOpen className="w-4 h-4 text-zinc-400 dark:text-zinc-600 shrink-0" />
-          <span className="text-sm font-semibold text-zinc-400 dark:text-zinc-600 flex-1">
+          <DoorOpen className="w-4 h-4 text-zinc-600 dark:text-zinc-400 shrink-0" />
+          <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 flex-1">
             Doors
           </span>
-          <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500">
-            Coming Soon
+          {!doorsOpen && doorItems.length > 0 && (
+            <span className="text-[10px] text-zinc-400 dark:text-zinc-500 mr-1">
+              {doorItems.length} {doorItems.length === 1 ? "row" : "rows"}
+            </span>
+          )}
+          <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
+            Active
           </span>
           <ChevronDown
-            className={`w-4 h-4 text-zinc-300 dark:text-zinc-600 shrink-0 transition-transform duration-200 ${
+            className={`w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 transition-transform duration-200 ${
               doorsOpen ? "rotate-180" : ""
             }`}
           />
         </button>
 
         {doorsOpen && (
-          <div className="border-t border-zinc-200 dark:border-zinc-800 px-5 py-6 text-center">
-            <p className="text-sm text-zinc-400 dark:text-zinc-500">
-              Door extraction is coming soon.
-            </p>
+          <div className="border-t border-zinc-200 dark:border-zinc-800 px-5 py-5 space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wide">
+                  Door Schedule
+                  <span className="ml-2 font-normal normal-case text-zinc-400">
+                    ({doorItems.length} {doorItems.length === 1 ? "row" : "rows"})
+                  </span>
+                </h3>
+                <div className="flex items-center gap-2">
+                  {addDoorError && (
+                    <span className="text-xs text-red-500 dark:text-red-400">{addDoorError}</span>
+                  )}
+                  <button
+                    onClick={handleAddDoor}
+                    disabled={addingDoor}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/60 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Plus className="w-3 h-3" />
+                    {addingDoor ? "Adding…" : "Add Door"}
+                  </button>
+                </div>
+              </div>
+
+              <EditableDoorTable items={doorItems} onChange={onDoorsChange} />
+            </div>
           </div>
         )}
       </section>

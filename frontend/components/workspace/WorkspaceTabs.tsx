@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type {
+  DoorItem,
   ExtractionResponse,
   ProjectInfo,
   RecommendationsResponse,
@@ -29,6 +30,7 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
   const [extraction, setExtraction] = useState<ExtractionResponse | null>(null);
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [windowItems, setWindowItems] = useState<WindowItem[]>([]);
+  const [doorItems, setDoorItems] = useState<DoorItem[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
         setExtraction(data);
         setProjectInfo(data.project_info);
         setWindowItems(data.window_items);
+        setDoorItems(data.door_items ?? []);
       })
       .catch((err) =>
         setLoadError(err instanceof Error ? err.message : "Failed to load extraction.")
@@ -55,7 +58,7 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
   }, [sessionId, extractionReady]);
 
   // ── Autosave ──────────────────────────────────────────────────────────
-  const schedulePatch = (pi: ProjectInfo | null, wi: WindowItem[]) => {
+  const schedulePatch = (pi: ProjectInfo | null, wi: WindowItem[], di: DoorItem[]) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       setSaving(true);
@@ -64,7 +67,11 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
         await apiFetch(`/api/sessions/${sessionId}/extraction`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project_info: pi ?? undefined, window_items: wi }),
+          body: JSON.stringify({
+            project_info: pi ?? undefined,
+            window_items: wi,
+            door_items: di,
+          }),
         });
       } catch (err) {
         setSaveError(err instanceof Error ? err.message : "Save failed.");
@@ -77,16 +84,25 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
   const handleProjectChange = (updated: Partial<ProjectInfo>) => {
     const next = { ...(projectInfo ?? ({} as ProjectInfo)), ...updated };
     setProjectInfo(next);
-    schedulePatch(next, windowItems);
+    schedulePatch(next, windowItems, doorItems);
   };
 
   const handleWindowsChange = (updated: WindowItem[]) => {
     setWindowItems(updated);
-    schedulePatch(projectInfo, updated);
+    schedulePatch(projectInfo, updated, doorItems);
   };
 
   const handleAddWindow = (newItem: WindowItem) => {
     setWindowItems((prev) => [...prev, newItem]);
+  };
+
+  const handleDoorsChange = (updated: DoorItem[]) => {
+    setDoorItems(updated);
+    schedulePatch(projectInfo, windowItems, updated);
+  };
+
+  const handleAddDoor = (newItem: DoorItem) => {
+    setDoorItems((prev) => [...prev, newItem]);
   };
 
   // ── Quote generation: flush → confirm → fetch ─────────────────────────
@@ -109,7 +125,11 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
       await apiFetch(`/api/sessions/${sessionId}/extraction`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_info: pi ?? undefined, window_items: wi }),
+        body: JSON.stringify({
+          project_info: pi ?? undefined,
+          window_items: wi,
+          door_items: doorItems,
+        }),
       });
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Save failed.");
@@ -189,9 +209,12 @@ export default function WorkspaceTabs({ sessionId, extractionReady }: Props) {
                 <MaterialSection
                   sessionId={sessionId}
                   windowItems={windowItems}
+                  doorItems={doorItems}
                   warnings={extraction.warnings}
                   onWindowsChange={handleWindowsChange}
                   onAddWindow={handleAddWindow}
+                  onDoorsChange={handleDoorsChange}
+                  onAddDoor={handleAddDoor}
                 />
               </div>
             )}
