@@ -18,8 +18,11 @@ from typing import Dict, List
 import fitz  # PyMuPDF
 
 from app.services.extraction.pdf._helpers import (
+    close_session_log,
     log_debug,
     log_section,
+    normalize_for_matching,
+    open_session_log,
     preview_text,
 )
 from app.services.extraction.pdf.candidate_selector import PDFCandidateSelector
@@ -27,8 +30,13 @@ from app.services.extraction.pdf.config import PDFExtractionConfig
 from app.services.extraction.pdf.crop_planner import PDFCropPlanner
 from app.services.extraction.pdf.crop_renderer import PDFCropRenderer
 from app.services.extraction.pdf.debug_writer import PDFExtractionDebugWriter
+from app.services.extraction.pdf.fast_page_router import (
+    FastPageRouter,
+    FastPageRoutingResult,
+    RoutedPage,
+)
 from app.services.extraction.pdf.llm_client import LangChainLLMClient
-from app.services.extraction.pdf.models import PDFExtractionArtifacts
+from app.services.extraction.pdf.models import PageAnalysis, PDFExtractionArtifacts
 from app.services.extraction.pdf.page_analyzer import PDFPageAnalyzer
 from app.services.extraction.pdf.project_info_extractor import PDFProjectInfoExtractor
 from app.services.extraction.pdf.renderer import PDFRenderer
@@ -76,12 +84,6 @@ class PDFExtractionService:
     ) -> ExtractionResult:
         """Run the LangChain crop-planning extraction. Returns an ExtractionResult."""
 
-        log_section("PDF Extraction Service Started")
-        log_debug(f"session_id={session_id}, file_type={file_type}")
-        log_debug(f"Model: {self.config.llm_model}")
-        log_debug(f"Full-page render DPI: {self.config.render_dpi}")
-        log_debug(f"Crop render DPI: {self.config.crop_dpi}")
-
         warnings: List[str] = []
         debug_trace: Dict = {
             "database_used": True,
@@ -102,14 +104,29 @@ class PDFExtractionService:
         out_dir = debug_writer.ensure_session_dir(session_id)
         debug_trace["debug_output_dir"] = str(out_dir)
 
-        doc = fitz.open(stream=io.BytesIO(content), filetype="pdf")
+        # Tee all pipeline logs (log_section/log_step/log_debug) to a per-session
+        # file next to the other debug artifacts, e.g.
+        # storage/extraction_debug/<session_id>/extraction.log
+        log_handle = open_session_log(out_dir / "extraction.log")
+
+        doc = None
         try:
+            log_section("PDF Extraction Service Started")
+            log_debug(f"session_id={session_id}, file_type={file_type}")
+            log_debug(f"Model: {self.config.llm_model}")
+            log_debug(f"Full-page render DPI: {self.config.render_dpi}")
+            log_debug(f"Crop render DPI: {self.config.crop_dpi}")
+            log_debug(f"Debug output dir: {out_dir}")
+            log_debug(f"Session log file: {out_dir / 'extraction.log'}")
+
+            doc = fitz.open(stream=io.BytesIO(content), filetype="pdf")
             page_count = doc.page_count
             debug_trace["file_type"] = file_type
             debug_trace["page_count"] = page_count
             log_debug(f"Detected file_type={file_type}, page_count={page_count}")
 
-            # ── Stage 1: outline + per-page analysis ──────────────────────────
+            # ── Stage 1: outline + fast routing, then either fast path or the
+            #    heavy per-page analyzer fallback ────────────────────────────────
             progress.start(STEP_ANALYZE)
             analyzer = PDFPageAnalyzer()
             outline_titles_by_page = analyzer.extract_outline_titles(doc)
@@ -119,8 +136,50 @@ class PDFExtractionService:
             debug_trace["outline_title_count"] = sum(
                 len(v) for v in outline_titles_by_page.values()
             )
-            analyses = analyzer.analyze(doc, outline_titles_by_page)
+
+            # Cheap deterministic routing pass (no render, no LLM). When the
+            # router is highly confident we skip the heavy analyzer/selector.
+            routing: FastPageRoutingResult | None = None
+            use_fast_path = False
+            fallback_reason: str | None = None
+            analyses: List[PageAnalysis] | None = None
+
+            if self.config.fast_router_enabled:
+                routing = FastPageRouter().route(doc, outline_titles_by_page)
+                use_fast_path = routing.used_fast_path
+                if not use_fast_path:
+                    fallback_reason = (
+                        f"fast_router_confidence={routing.confidence}; "
+                        f"schedule_candidates={len(routing.schedule_candidates)}"
+                    )
+            else:
+                fallback_reason = "fast_router_disabled"
+
+            if use_fast_path and routing is not None:
+                # Fast path: route directly to schedule candidates; skip the
+                # expensive per-page analysis + candidate selection.
+                selected_pages = self._routed_to_analyses(
+                    doc, routing.schedule_candidates, outline_titles_by_page
+                )
+                log_debug(
+                    f"FAST PATH: routed schedule pages "
+                    f"{[p.page_number for p in selected_pages]} "
+                    f"(confidence={routing.confidence}); skipping heavy analyzer/selector."
+                )
+            else:
+                # Fallback: existing robust per-page analysis (unchanged).
+                analyses = analyzer.analyze(doc, outline_titles_by_page)
+                if fallback_reason:
+                    log_debug(f"FALLBACK PATH: {fallback_reason}; running heavy analyzer.")
             progress.complete(STEP_ANALYZE)
+
+            debug_trace["fast_path_used"] = use_fast_path
+            debug_trace["fallback_reason"] = fallback_reason
+            if routing is not None:
+                debug_trace["fast_page_routing"] = routing.to_debug_dict()
+                debug_trace["elevation_candidate_page_numbers"] = [
+                    c.page_number for c in routing.elevation_candidates
+                ]
 
             # Renderer + LLM client are shared by project-info extraction and
             # downstream schedule extraction. Initialize once, here, so an
@@ -131,7 +190,14 @@ class PDFExtractionService:
             # ── Stage 1b: select project-info pages ───────────────────────────
             progress.start(STEP_PROJECT_INFO_SELECT)
             pi_extractor = PDFProjectInfoExtractor(self.config, llm_client)
-            project_info_pages = pi_extractor.select_pages(analyses)
+            if use_fast_path and routing is not None:
+                # Use the router's lightweight project-info candidates so we do
+                # not depend on the heavy analyzer having run.
+                project_info_pages = self._routed_to_analyses(
+                    doc, routing.project_info_candidates, outline_titles_by_page
+                )
+            else:
+                project_info_pages = pi_extractor.select_pages(analyses or [])
             progress.complete(STEP_PROJECT_INFO_SELECT)
 
             # ── Stage 1c: extract project information ─────────────────────────
@@ -150,8 +216,15 @@ class PDFExtractionService:
 
             # ── Stage 2: candidate selection ──────────────────────────────────
             progress.start(STEP_SELECT)
-            selector = PDFCandidateSelector(self.config)
-            selected_pages = selector.select(analyses, page_count)
+            if use_fast_path:
+                # selected_pages already routed in Stage 1; skip heavy selector.
+                log_debug(
+                    "FAST PATH: using routed schedule candidates; "
+                    "skipping PDFCandidateSelector."
+                )
+            else:
+                selector = PDFCandidateSelector(self.config)
+                selected_pages = selector.select(analyses or [], page_count)
             progress.complete(STEP_SELECT)
 
             # ── Stage 3: full-page render ─────────────────────────────────────
@@ -194,8 +267,11 @@ class PDFExtractionService:
                 )
 
             # ── Debug artifacts ───────────────────────────────────────────────
+            # In the fast path there is no full per-page analysis; fall back to
+            # the routed/selected pages so the artifact stays valid.
+            candidate_pages_source = analyses if analyses is not None else selected_pages
             candidate_pages_dict = []
-            for p in analyses:
+            for p in candidate_pages_source:
                 candidate_pages_dict.append({
                     "page_index": p.page_index,
                     "page_number": p.page_number,
@@ -301,6 +377,22 @@ class PDFExtractionService:
 
             debug_writer.write_result(out_dir, artifacts)
 
+            # Dedicated fast-routing debug artifact.
+            if routing is not None:
+                routing_payload = routing.to_debug_dict()
+                routing_payload["fast_path_used"] = use_fast_path
+                routing_payload["fallback_reason"] = fallback_reason
+                debug_writer.write_fast_routing(out_dir, routing_payload)
+            else:
+                debug_writer.write_fast_routing(
+                    out_dir,
+                    {
+                        "fast_path_used": False,
+                        "fallback_reason": fallback_reason,
+                        "note": "Fast router disabled; heavy analyzer used.",
+                    },
+                )
+
             log_section("8. Final summary")
             log_debug(f"Outline/sidebar title pages found: {debug_trace.get('outline_title_pages_found', [])}")
             log_debug(f"Selected pages: {debug_trace['selected_page_numbers']}")
@@ -326,4 +418,63 @@ class PDFExtractionService:
             )
 
         finally:
-            doc.close()
+            if doc is not None:
+                doc.close()
+            close_session_log(log_handle)
+
+    # ── Fast-path adapter ───────────────────────────────────────────────────────
+
+    def _routed_to_analyses(
+        self,
+        doc: "fitz.Document",
+        routed_pages: List[RoutedPage],
+        outline_titles_by_page: Dict[int, List[str]],
+    ) -> List[PageAnalysis]:
+        """Adapt fast-router results into the PageAnalysis objects consumed by the
+        downstream render / crop-plan / extraction stages.
+
+        Only the routed pages have their native text read here (cheap, a handful
+        of pages) so the heavy whole-document analysis is avoided. Scoring fields
+        are derived from the router confidence purely for debug visibility.
+        """
+        analyses: List[PageAnalysis] = []
+        for rp in routed_pages:
+            page = doc[rp.page_index]
+            text = page.get_text("text", sort=True) or ""
+
+            outline_titles = list(outline_titles_by_page.get(rp.page_index, []))
+            title_candidates: List[str] = []
+            if rp.sheet_title:
+                title_candidates.append(normalize_for_matching(rp.sheet_title))
+            for t in outline_titles:
+                nt = normalize_for_matching(t)
+                if nt and nt not in title_candidates:
+                    title_candidates.append(nt)
+
+            score = round(rp.confidence * 100.0, 2)
+            title_source = "pdf_outline" if rp.source == "pdf_outline" else f"fast_router_{rp.source}"
+
+            analyses.append(
+                PageAnalysis(
+                    page_index=rp.page_index,
+                    page_number=rp.page_number,
+                    text=text,
+                    text_length=len(text),
+                    title_candidates=title_candidates,
+                    title_source=title_source,
+                    outline_titles=outline_titles,
+                    heuristic_titles=[],
+                    sheet_number_candidates=[rp.sheet_number] if rp.sheet_number else [],
+                    title_score=score,
+                    native_text_score=0.0,
+                    final_score=score,
+                    selected=True,
+                    selection_reason=(
+                        f"fast_page_router[{rp.source}] role={rp.role} "
+                        f"confidence={rp.confidence} terms={rp.matched_terms}"
+                    ),
+                    positive_signals=[f"fast_router matched: {t}" for t in rp.matched_terms],
+                    negative_signals=[],
+                )
+            )
+        return analyses

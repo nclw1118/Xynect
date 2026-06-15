@@ -36,3 +36,16 @@ class PDFExtractionDebugWriter:
         except Exception as exc:
             log_debug(f"Could not write extraction_result.json: {exc}")
             return None
+
+    def write_fast_routing(self, out_dir: Path, payload: dict) -> Path | None:
+        """Write the fast_page_routing.json debug artifact."""
+        if not self.config.save_debug_artifacts:
+            return None
+        try:
+            routing_path = out_dir / "fast_page_routing.json"
+            routing_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            log_debug(f"Saved fast routing JSON: {routing_path}")
+            return routing_path
+        except Exception as exc:
+            log_debug(f"Could not write fast_page_routing.json: {exc}")
+            return None

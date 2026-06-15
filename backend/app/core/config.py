@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     pdf_debug_output_dir: str = "./storage/extraction_debug"
     pdf_save_debug_artifacts: bool = True
 
+    # Fast deterministic page routing (pre-analyzer). When enabled and the
+    # router is highly confident, the heavy page_analyzer + candidate_selector
+    # path is skipped for schedule/elevation candidate selection.
+    pdf_fast_router_enabled: bool = True
+
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",

@@ -23,6 +23,9 @@ class PDFExtractionConfig:
     top_native_text_backup_pages: int
     max_candidate_pages_sent_to_llm: int
 
+    # Fast deterministic page routing (pre-analyzer)
+    fast_router_enabled: bool
+
     # Debug
     debug_output_dir: str
     save_debug_artifacts: bool
@@ -46,6 +49,7 @@ class PDFExtractionConfig:
             strong_title_threshold=settings.pdf_strong_title_threshold,
             top_native_text_backup_pages=settings.pdf_top_native_text_backup_pages,
             max_candidate_pages_sent_to_llm=settings.pdf_max_candidate_pages_sent_to_llm,
+            fast_router_enabled=settings.pdf_fast_router_enabled,
             debug_output_dir=settings.pdf_debug_output_dir,
             save_debug_artifacts=settings.pdf_save_debug_artifacts,
             openai_api_key=settings.openai_api_key,
