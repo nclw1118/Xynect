@@ -20,6 +20,9 @@ from app.services.extraction.normalizers import normalize_value
 @dataclass
 class ExtractionResult:
     window_rows: list[dict]
+    # door_rows defaults to [] so spreadsheet / window-only paths and older
+    # callers stay backward-compatible.
+    door_rows: list[dict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     project_info: dict | None = None  # always None for spreadsheets
 

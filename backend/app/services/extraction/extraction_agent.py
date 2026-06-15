@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.models.door_item import DoorItem
 from app.models.progress_step import ProgressStep
 from app.models.project import ProjectInfo
 from app.models.session import Session
@@ -87,6 +88,33 @@ def _save_window_items(db: DBSession, session_id: str, rows: list[dict]) -> None
                 u_value=row.get("u_value"),
                 shgc=row.get("shgc"),
                 vt=row.get("vt"),
+                glass_type=row.get("glass_type"),
+                confidence=row.get("confidence", 0.0),
+                notes=row.get("notes"),
+                original_extraction=original,
+                user_edits={},
+            )
+        )
+    db.flush()
+
+
+def _save_door_items(db: DBSession, session_id: str, rows: list[dict]) -> None:
+    for row in rows:
+        original = {k: v for k, v in row.items() if k not in {"material_type", "confidence"}}
+        db.add(
+            DoorItem(
+                id=str(uuid.uuid4()),
+                session_id=session_id,
+                material_type=row.get("material_type", "Door"),
+                tag=row.get("tag"),
+                width=row.get("width"),
+                height=row.get("height"),
+                area=row.get("area"),
+                quantity=row.get("quantity"),
+                opening_type=row.get("opening_type"),
+                material=row.get("material"),
+                fire_rating=row.get("fire_rating"),
+                self_closing=row.get("self_closing"),
                 glass_type=row.get("glass_type"),
                 confidence=row.get("confidence", 0.0),
                 notes=row.get("notes"),
@@ -308,6 +336,7 @@ def _run(session_id: str, file_path: str, file_type: str, db: DBSession) -> None
 
     _save_project_info(db, session_id, result.project_info)
     _save_window_items(db, session_id, result.window_rows)
+    _save_door_items(db, session_id, getattr(result, "door_rows", []) or [])
 
     # Mark "Saving extracted rows" complete
     saving_step = (

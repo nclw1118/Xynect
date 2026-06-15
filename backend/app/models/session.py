@@ -42,6 +42,11 @@ class Session(Base):
         back_populates="session",
         cascade="all, delete-orphan",
     )
+    door_items = relationship(
+        "DoorItem",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
     progress_steps = relationship(
         "ProgressStep",
         back_populates="session",

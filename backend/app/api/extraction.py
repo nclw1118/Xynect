@@ -5,10 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.database import get_db
+from app.models.door_item import DoorItem
 from app.models.project import ProjectInfo
 from app.models.session import Session
 from app.models.window_item import WindowItem
 from app.schemas.extraction import (
+    DoorItemSchema,
     ExtractionResponse,
     PatchExtractionRequest,
     PatchExtractionResponse,
@@ -22,6 +24,30 @@ _EDITABLE_WINDOW_FIELDS = [
     "tag", "width", "height", "area", "quantity",
     "opening_type", "material", "u_value", "shgc", "vt", "glass_type", "notes",
 ]
+
+_EDITABLE_DOOR_FIELDS = [
+    "tag", "opening_type", "quantity", "width", "height", "area",
+    "material", "fire_rating", "self_closing", "glass_type", "notes",
+]
+
+
+def _to_door_schema(item: DoorItem) -> DoorItemSchema:
+    return DoorItemSchema(
+        id=item.id,
+        tag=item.tag,
+        material_type=item.material_type,
+        width=item.width,
+        height=item.height,
+        area=item.area,
+        quantity=item.quantity,
+        opening_type=item.opening_type,
+        material=item.material,
+        fire_rating=item.fire_rating,
+        self_closing=item.self_closing,
+        glass_type=item.glass_type,
+        confidence=item.confidence,
+        notes=item.notes,
+    )
 
 
 @router.get("/{session_id}/extraction", response_model=ExtractionResponse)
@@ -41,6 +67,12 @@ def get_extraction(session_id: str, db: DBSession = Depends(get_db)) -> Extracti
         db.query(WindowItem)
         .filter(WindowItem.session_id == session_id)
         .order_by(WindowItem.created_at)
+        .all()
+    )
+    door_items = (
+        db.query(DoorItem)
+        .filter(DoorItem.session_id == session_id)
+        .order_by(DoorItem.created_at)
         .all()
     )
 
@@ -81,10 +113,13 @@ def get_extraction(session_id: str, db: DBSession = Depends(get_db)) -> Extracti
         for item in items
     ]
 
+    door_schemas = [_to_door_schema(item) for item in door_items]
+
     return ExtractionResponse(
         session_id=session_id,
         project_info=project_schema,
         window_items=window_schemas,
+        door_items=door_schemas,
         warnings=warnings,
     )
 
@@ -126,6 +161,32 @@ def patch_extraction(
             patch_fields = patch_item.model_dump(exclude={"id"}, exclude_unset=True)
             for field_name, new_value in patch_fields.items():
                 if field_name not in _EDITABLE_WINDOW_FIELDS:
+                    continue
+                original_value = original.get(field_name)
+                edited = new_value != original_value
+                user_edits[field_name] = {
+                    "original_value": original_value,
+                    "current_value": new_value,
+                    "edited_by_user": edited,
+                }
+                setattr(db_item, field_name, new_value)
+
+            db_item.user_edits = user_edits
+            db_item.updated_at = datetime.now(timezone.utc)
+
+    # ── Update door items ─────────────────────────────────────────────────
+    if body.door_items:
+        for patch_item in body.door_items:
+            db_item = db.query(DoorItem).filter(DoorItem.id == patch_item.id).first()
+            if not db_item:
+                continue
+
+            original = db_item.original_extraction or {}
+            user_edits = dict(db_item.user_edits or {})
+
+            patch_fields = patch_item.model_dump(exclude={"id"}, exclude_unset=True)
+            for field_name, new_value in patch_fields.items():
+                if field_name not in _EDITABLE_DOOR_FIELDS:
                     continue
                 original_value = original.get(field_name)
                 edited = new_value != original_value
@@ -185,3 +246,31 @@ def add_window(session_id: str, db: DBSession = Depends(get_db)) -> WindowItemSc
         confidence=item.confidence,
         notes=item.notes,
     )
+
+
+@router.post("/{session_id}/doors", response_model=DoorItemSchema)
+def add_door(session_id: str, db: DBSession = Depends(get_db)) -> DoorItemSchema:
+    session = db.query(Session).filter(Session.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    if session.status not in {"review_ready", "confirmed", "recommendation_ready"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot add door in session status: {session.status}",
+        )
+
+    item = DoorItem(
+        id=str(uuid.uuid4()),
+        session_id=session_id,
+        material_type="Door",
+        confidence=0.0,
+        notes="Manually added by user",
+        original_extraction={},
+        user_edits={},
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    return _to_door_schema(item)
