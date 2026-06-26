@@ -112,6 +112,32 @@ def test_full_outline_set_uses_fast_path():
     assert [c.page_number for c in result.elevation_candidates] == [3, 4]
 
 
+@pytest.mark.parametrize(
+    "title, expected_role",
+    [
+        # Regression: plural "WINDOWS & DOORS SCHEDULE" was missed (singular-only
+        # triggers) so the page never routed and extraction returned 0 rows.
+        ("A-402.00 - WINDOWS & DOORS SCHEDULE", "combined_schedule"),
+        ("WINDOWS SCHEDULE", "window_schedule"),
+        ("DOORS SCHEDULE", "door_schedule"),
+        ("WINDOWS AND DOORS SCHEDULE", "combined_schedule"),
+    ],
+)
+def test_plural_schedule_titles_route_high_confidence(title, expected_role):
+    result = _route(
+        pages=[["COVER SHEET"], ["A-402.00", "schedule table", "W-1 3'-0\" 4'-0\""]],
+        toc=[(1, title, 2)],
+    )
+    assert result.confidence == "high"
+    assert result.used_fast_path is True
+    assert len(result.schedule_candidates) == 1
+    cand = result.schedule_candidates[0]
+    assert cand.page_number == 2
+    assert cand.role == expected_role
+    assert cand.source == "pdf_outline"
+    assert cand.confidence == pytest.approx(0.95)
+
+
 # ── Native-title (no outline) high confidence ──────────────────────────────────
 
 def test_native_title_schedule_high_confidence():

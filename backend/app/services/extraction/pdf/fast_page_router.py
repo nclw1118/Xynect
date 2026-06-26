@@ -47,17 +47,33 @@ from app.services.extraction.pdf.page_analyzer import (
 #   "WINDOW/DOOR SCHEDULE"                -> "WINDOW DOOR SCHEDULE"
 # All triggers below are written in that normalized form.
 
+# Canonical schedule phrases (for matched_terms reporting). Detection itself
+# uses SCHEDULE_RE below, which generalizes these to tolerate plurals
+# ("WINDOWS & DOORS SCHEDULE") and combined titles with intervening words
+# ("WINDOW, DOOR, WALL & FLOOR SCHEDULE").
 SCHEDULE_TRIGGERS: List[str] = [
     "WINDOW SCHEDULE",
     "WINDOWS SCHEDULE",
     "DOOR SCHEDULE",
+    "DOORS SCHEDULE",
     "EXTERIOR DOOR SCHEDULE",
     "INTERIOR DOOR SCHEDULE",
     "WINDOW DOOR WALL AND FLOOR SCHEDULE",
     "WINDOW AND DOOR SCHEDULE",
+    "WINDOWS AND DOORS SCHEDULE",
     "WINDOW DOOR SCHEDULE",
     "FENESTRATION SCHEDULE",
 ]
+
+# A title/line is a window/door schedule reference if an opening keyword
+# (WINDOW(S) / DOOR(S) / FENESTRATION / GLAZING / OPENING(S)) is followed by
+# SCHEDULE on the same line, possibly with intervening words (WALL, FLOOR, &).
+# Operates on normalized text (uppercase, "&"->"AND", punctuation->space), so
+# it matches "WINDOWS AND DOORS SCHEDULE", "WINDOW DOOR WALL AND FLOOR
+# SCHEDULE", "EXTERIOR DOOR SCHEDULE", etc.
+SCHEDULE_RE = re.compile(
+    r"\b(?:WINDOWS?|DOORS?|FENESTRATION|GLAZING|OPENINGS?)\b[A-Z0-9\s\.\-]*\bSCHEDULE\b"
+)
 
 ELEVATION_TRIGGER = "ELEVATION"
 ELEVATION_DIRECTIONAL: List[str] = [
@@ -169,6 +185,12 @@ def _schedule_role(title_text: str) -> str:
     return "window_schedule"
 
 
+def _schedule_terms(norm: str, match: "re.Match") -> List[str]:
+    """matched_terms: canonical phrases present, else the raw matched phrase."""
+    hits = [t for t in SCHEDULE_TRIGGERS if t in norm]
+    return hits or [match.group(0).strip()]
+
+
 @dataclass
 class _PageData:
     page_index: int
@@ -185,15 +207,10 @@ class _PageData:
 # ── Per-page direct detection ──────────────────────────────────────────────────
 
 def _detect_schedule(pd: _PageData) -> Optional[RoutedPage]:
-    text_hits = [t for t in SCHEDULE_TRIGGERS if t in pd.norm_full]
-    outline_has = any(t in norm for norm in pd.outline_norm for t in SCHEDULE_TRIGGERS)
-    if not text_hits and not outline_has:
-        return None
-
     # 1) PDF outline title for this page (strong, independent of page text).
     for raw, norm in zip(pd.outline_raw, pd.outline_norm):
-        hits = [t for t in SCHEDULE_TRIGGERS if t in norm]
-        if hits:
+        m = SCHEDULE_RE.search(norm)
+        if m:
             return RoutedPage(
                 page_index=pd.page_index,
                 page_number=pd.page_number,
@@ -202,13 +219,13 @@ def _detect_schedule(pd: _PageData) -> Optional[RoutedPage]:
                 sheet_title=raw,
                 confidence=CONF_EXACT_TITLE,
                 source="pdf_outline",
-                matched_terms=hits,
+                matched_terms=_schedule_terms(norm, m),
             )
 
-    # 2) Native page-local title line.
+    # 2) Native page-local title line (a short line dominated by the phrase).
     for raw, norm in zip(pd.raw_lines, pd.norm_lines):
-        hits = [t for t in SCHEDULE_TRIGGERS if _is_title_like(norm, t)]
-        if hits:
+        m = SCHEDULE_RE.search(norm)
+        if m and len(norm) <= len(m.group(0)) + TITLE_SLACK:
             return RoutedPage(
                 page_index=pd.page_index,
                 page_number=pd.page_number,
@@ -217,20 +234,25 @@ def _detect_schedule(pd: _PageData) -> Optional[RoutedPage]:
                 sheet_title=raw.strip(),
                 confidence=CONF_EXACT_TITLE,
                 source="native_title",
-                matched_terms=hits,
+                matched_terms=_schedule_terms(norm, m),
             )
 
-    # 3) Broad native-text keyword only.
-    return RoutedPage(
-        page_index=pd.page_index,
-        page_number=pd.page_number,
-        role=_schedule_role(" ".join(text_hits)),
-        sheet_number=_pick_sheet(pd.sheet_numbers),
-        sheet_title=None,
-        confidence=CONF_TEXT_KEYWORD,
-        source="text_keyword",
-        matched_terms=text_hits,
-    )
+    # 3) Broad native-text keyword: any line mentioning a schedule phrase.
+    for raw, norm in zip(pd.raw_lines, pd.norm_lines):
+        m = SCHEDULE_RE.search(norm)
+        if m:
+            return RoutedPage(
+                page_index=pd.page_index,
+                page_number=pd.page_number,
+                role=_schedule_role(norm),
+                sheet_number=_pick_sheet(pd.sheet_numbers),
+                sheet_title=None,
+                confidence=CONF_TEXT_KEYWORD,
+                source="text_keyword",
+                matched_terms=_schedule_terms(norm, m),
+            )
+
+    return None
 
 
 def _detect_elevation(pd: _PageData) -> Optional[RoutedPage]:
@@ -351,7 +373,8 @@ def _resolve_drawing_list(
                 continue
             sheet_no = m.group(0).strip()
 
-            sched_hits = [t for t in SCHEDULE_TRIGGERS if t in norm]
+            sched_match = SCHEDULE_RE.search(norm)
+            sched_hits = _schedule_terms(norm, sched_match) if sched_match else []
             elev = ELEVATION_TRIGGER in norm
 
             if not sched_hits and not elev:

@@ -23,6 +23,13 @@ from app.services.extraction.pdf.models import PageAnalysis
 # ── Deterministic scoring rules (verbatim from prototype) ─────────────────────
 
 TITLE_POSITIVE_RULES: List[Tuple[str, float, str]] = [
+    # Plural- and combined-tolerant rules. Titles are normalized (uppercase,
+    # "&"->"AND", punctuation->space), so these match "WINDOWS & DOORS SCHEDULE",
+    # "WINDOW, DOOR, WALL & FLOOR SCHEDULE", "EXTERIOR DOOR SCHEDULE", etc.
+    (r"\bWINDOWS?\b[A-Z0-9\s\.\-]*\bDOORS?\b[A-Z0-9\s\.\-]*\bSCHEDULE\b", 100, "combined window/door schedule title"),
+    (r"\bDOORS?\b[A-Z0-9\s\.\-]*\bWINDOWS?\b[A-Z0-9\s\.\-]*\bSCHEDULE\b", 100, "combined door/window schedule title"),
+    (r"\bWINDOWS?\s+SCHEDULE\b", 100, "title phrase: WINDOW(S) SCHEDULE"),
+    (r"\bDOORS?\s+SCHEDULE\b", 90, "title phrase: DOOR(S) SCHEDULE"),
     (r"\bWINDOW SCHEDULE\b", 100, "exact title phrase: WINDOW SCHEDULE"),
     (r"\bDOOR AND WINDOW SCHEDULE\b", 95, "exact title phrase: DOOR AND WINDOW SCHEDULE"),
     (r"\bDOOR WINDOW SCHEDULE\b", 90, "title phrase: DOOR WINDOW SCHEDULE"),
