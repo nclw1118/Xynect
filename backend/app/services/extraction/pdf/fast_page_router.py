@@ -118,6 +118,19 @@ CONF_FIRST_PAGE = 0.50    # page 1 always kept as a project-info candidate
 # to "high".
 STRONG_SOURCES = ("pdf_outline", "native_title")
 
+# A candidate is "strong" only if it comes from a page-local title with high
+# confidence. Strong candidates suppress weaker ones during final filtering.
+STRONG_CONF_THRESHOLD = 0.9
+
+# Tie-break priority for decision/filtering ordering (lower = preferred).
+SOURCE_PRIORITY = {
+    "pdf_outline": 0,
+    "native_title": 1,
+    "drawing_list": 2,
+    "text_keyword": 3,
+    "first_page_default": 4,
+}
+
 # Max chars of slack a line may have beyond a phrase to still be "title-like".
 # Allows a leading sheet number, e.g. "A-401.00 - WINDOW SCHEDULE".
 TITLE_SLACK = 30
@@ -137,6 +150,9 @@ class RoutedPage:
 
 @dataclass
 class FastPageRoutingResult:
+    # schedule_candidates / elevation_candidates are the FINAL active candidates
+    # (after confidence/source filtering). The raw_* lists keep everything that
+    # was detected before filtering, for debug.
     schedule_candidates: List[RoutedPage]
     elevation_candidates: List[RoutedPage]
     project_info_candidates: List[RoutedPage]
@@ -144,14 +160,30 @@ class FastPageRoutingResult:
     used_fast_path: bool
     warnings: List[str] = field(default_factory=list)
     debug: dict = field(default_factory=dict)
+    raw_schedule_candidates: List[RoutedPage] = field(default_factory=list)
+    raw_elevation_candidates: List[RoutedPage] = field(default_factory=list)
+    filtered_out_schedule_candidates: List[RoutedPage] = field(default_factory=list)
+    filtered_out_elevation_candidates: List[RoutedPage] = field(default_factory=list)
+    candidate_filter_reason: dict = field(default_factory=dict)
 
     def to_debug_dict(self) -> dict:
         return {
             "confidence": self.confidence,
             "used_fast_path": self.used_fast_path,
+            # Final active candidates.
             "schedule_candidates": [asdict(c) for c in self.schedule_candidates],
             "elevation_candidates": [asdict(c) for c in self.elevation_candidates],
             "project_info_candidates": [asdict(c) for c in self.project_info_candidates],
+            # Raw (pre-filter) + what got dropped, for inspection.
+            "raw_schedule_candidates": [asdict(c) for c in self.raw_schedule_candidates],
+            "raw_elevation_candidates": [asdict(c) for c in self.raw_elevation_candidates],
+            "filtered_out_schedule_candidates": [
+                asdict(c) for c in self.filtered_out_schedule_candidates
+            ],
+            "filtered_out_elevation_candidates": [
+                asdict(c) for c in self.filtered_out_elevation_candidates
+            ],
+            "candidate_filter_reason": self.candidate_filter_reason,
             "warnings": list(self.warnings),
             "debug": self.debug,
         }
@@ -432,6 +464,53 @@ def _dedupe_best(candidates: List[RoutedPage]) -> List[RoutedPage]:
     return sorted(best.values(), key=lambda c: c.page_number)
 
 
+def _is_strong(c: RoutedPage) -> bool:
+    """Strong = page-local title (outline/native_title) with high confidence."""
+    return c.source in STRONG_SOURCES and c.confidence >= STRONG_CONF_THRESHOLD
+
+
+def _decision_sort_key(c: RoutedPage):
+    """Order for filtering decisions: confidence desc, source priority, page asc."""
+    return (-c.confidence, SOURCE_PRIORITY.get(c.source, 99), c.page_number)
+
+
+def _filter_candidates(
+    candidates: List[RoutedPage],
+) -> Tuple[List[RoutedPage], List[RoutedPage], str]:
+    """Pick the final active candidates from the raw (deduped) list.
+
+    If any strong candidate exists, keep ONLY strong ones (weak text_keyword /
+    drawing_list candidates are dropped). Otherwise keep all weak candidates as a
+    fallback, ordered by confidence. Returns (final, filtered_out, reason).
+    """
+    if not candidates:
+        return [], [], "no_candidates"
+
+    strong = [c for c in candidates if _is_strong(c)]
+    if strong:
+        # Final/render order is page-number ascending (decision already made).
+        final = sorted(strong, key=lambda c: c.page_number)
+        reason = (
+            f"{len(strong)} strong candidate(s) present "
+            f"(source in {list(STRONG_SOURCES)}, confidence>={STRONG_CONF_THRESHOLD}); "
+            f"dropped {len(candidates) - len(strong)} weaker candidate(s)"
+        )
+    else:
+        # No strong candidates: keep weak ones, best-first.
+        final = sorted(candidates, key=_decision_sort_key)
+        reason = (
+            "no strong candidates; kept weak candidates as fallback "
+            "(confidence desc, source priority, page asc)"
+        )
+
+    final_idx = {c.page_index for c in final}
+    filtered_out = sorted(
+        [c for c in candidates if c.page_index not in final_idx],
+        key=_decision_sort_key,
+    )
+    return final, filtered_out, reason
+
+
 # ── Router ─────────────────────────────────────────────────────────────────────
 
 class FastPageRouter:
@@ -506,8 +585,13 @@ class FastPageRouter:
         schedule.extend(dl_sched)
         elevation.extend(dl_elev)
 
-        schedule = _dedupe_best(schedule)
-        elevation = _dedupe_best(elevation)
+        # Raw (deduped) candidates kept for debug; final active candidates are
+        # filtered by confidence/source so weak text_keyword / drawing_list
+        # matches don't get forwarded when strong page-local titles exist.
+        raw_schedule = _dedupe_best(schedule)
+        raw_elevation = _dedupe_best(elevation)
+        schedule, sched_filtered_out, sched_reason = _filter_candidates(raw_schedule)
+        elevation, elev_filtered_out, elev_reason = _filter_candidates(raw_elevation)
 
         # ── Project-info: always page 1, then up to 2 keyword matches ──────────
         project_info_candidates: List[RoutedPage] = []
@@ -536,8 +620,8 @@ class FastPageRouter:
                 break
 
         # ── Confidence ─────────────────────────────────────────────────────────
-        strong_schedule = any(c.source in STRONG_SOURCES for c in schedule)
-        strong_elevation = any(c.source in STRONG_SOURCES for c in elevation)
+        strong_schedule = any(_is_strong(c) for c in schedule)
+        strong_elevation = any(_is_strong(c) for c in elevation)
 
         if strong_schedule or strong_elevation:
             confidence: Literal["high", "medium", "low"] = "high"
@@ -582,6 +666,11 @@ class FastPageRouter:
                 "drawing_list_pages": [pd.page_number for pd in pages if pd.is_drawing_list],
                 "per_page": per_page_debug,
             },
+            raw_schedule_candidates=raw_schedule,
+            raw_elevation_candidates=raw_elevation,
+            filtered_out_schedule_candidates=sched_filtered_out,
+            filtered_out_elevation_candidates=elev_filtered_out,
+            candidate_filter_reason={"schedule": sched_reason, "elevation": elev_reason},
         )
 
         log_debug(
@@ -589,6 +678,16 @@ class FastPageRouter:
             f"schedule={[c.page_number for c in schedule]}, "
             f"elevation={[c.page_number for c in elevation]}, "
             f"project_info={[c.page_number for c in project_info_candidates]}"
+        )
+        log_debug(
+            f"  raw schedule={[c.page_number for c in raw_schedule]} -> final "
+            f"{[c.page_number for c in schedule]}; "
+            f"filtered_out={[c.page_number for c in sched_filtered_out]} ({sched_reason})"
+        )
+        log_debug(
+            f"  raw elevation={[c.page_number for c in raw_elevation]} -> final "
+            f"{[c.page_number for c in elevation]}; "
+            f"filtered_out={[c.page_number for c in elev_filtered_out]} ({elev_reason})"
         )
         for c in schedule:
             log_debug(
