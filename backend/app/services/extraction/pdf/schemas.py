@@ -5,7 +5,7 @@ Ported verbatim from NOTEBOOKS/pdf_algo_test.py — schema fields unchanged.
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -108,3 +108,54 @@ class ProjectInfoResponse(BaseModel):
     city: str = Field(default="", description="City name. Empty if not visible.")
     state: str = Field(default="", description="Two-letter US state code if visible (e.g. NY). Empty otherwise.")
     zip_code: str = Field(default="", description="Postal code. Empty if not visible.")
+
+
+# ── Elevation (M2): passive directional elevation detection + crop planning ─────
+#
+# Direction is normalized lowercase to one of:
+#   east, west, north, south, front, rear, left, right, unknown.
+
+ELEVATION_DIRECTIONS = (
+    "east", "west", "north", "south", "front", "rear", "left", "right", "unknown",
+)
+
+
+class ElevationPageCandidate(BaseModel):
+    """Deterministic per-page elevation metadata (produced without LLM/render)."""
+
+    page_index: int
+    page_number: int
+    sheet_number: Optional[str] = None
+    sheet_title: Optional[str] = None
+    directions: List[str] = Field(default_factory=list)
+    scale: Optional[str] = None
+    source: Optional[str] = None
+    confidence: float = 0.0
+    reason: Optional[str] = None
+
+
+class ElevationRegion(BaseModel):
+    """One directional elevation drawing region on a page.
+
+    page_index/page_number default to 0 so the structured-output LLM does not
+    have to fill them; the pipeline overwrites them with the real page after the
+    crop-planning call.
+    """
+
+    page_index: int = 0
+    page_number: int = 0
+    sheet_number: Optional[str] = None
+    direction: str = Field(description="One of: east, west, north, south, front, rear, left, right, unknown.")
+    scale: Optional[str] = None
+    bbox: List[float] = Field(
+        description="Normalized [x0, y0, x1, y1] in 0..1; top-left origin."
+    )
+    confidence: float = 0.0
+    reason: Optional[str] = None
+
+
+class ElevationCropPlanResponse(BaseModel):
+    page_number: int
+    contains_elevation: bool
+    elevation_regions: List[ElevationRegion]
+    warnings: List[str] = Field(default_factory=list)

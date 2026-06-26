@@ -49,3 +49,16 @@ class PDFExtractionDebugWriter:
         except Exception as exc:
             log_debug(f"Could not write fast_page_routing.json: {exc}")
             return None
+
+    def write_elevation_regions(self, out_dir: Path, payload: dict) -> Path | None:
+        """Write the elevation_regions.json debug artifact (M2)."""
+        if not self.config.save_debug_artifacts:
+            return None
+        try:
+            path = out_dir / "elevation_regions.json"
+            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            log_debug(f"Saved elevation regions JSON: {path}")
+            return path
+        except Exception as exc:
+            log_debug(f"Could not write elevation_regions.json: {exc}")
+            return None
