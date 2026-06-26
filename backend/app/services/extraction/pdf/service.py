@@ -267,6 +267,18 @@ class PDFExtractionService:
                     "No window/opening schedule rows were extracted from selected candidate pages."
                 )
 
+            # ── Stage 6b: passive elevation branch (M2) ───────────────────────
+            # Never fatal: failures are logged + recorded in elevation_regions.json
+            # but must not change schedule extraction or fail the run.
+            elevation_payload = self._run_elevation_branch(
+                doc, routing, outline_titles_by_page, renderer, llm_client, out_dir
+            )
+            debug_writer.write_elevation_regions(out_dir, elevation_payload)
+            debug_trace["elevation_pages"] = [p["page_number"] for p in elevation_payload["pages"]]
+            debug_trace["elevation_region_count"] = len(
+                [r for r in elevation_payload["regions"] if r.get("valid")]
+            )
+
             # ── Debug artifacts ───────────────────────────────────────────────
             # In the fast path there is no full per-page analysis; fall back to
             # the routed/selected pages so the artifact stays valid.
@@ -484,3 +496,96 @@ class PDFExtractionService:
                 )
             )
         return analyses
+
+    # ── Passive elevation branch (M2) ───────────────────────────────────────────
+
+    def _run_elevation_branch(
+        self,
+        doc: "fitz.Document",
+        routing: FastPageRoutingResult | None,
+        outline_titles_by_page: Dict[int, List[str]],
+        renderer: PDFRenderer,
+        llm_client: LangChainLLMClient,
+        out_dir,
+    ) -> Dict:
+        """Detect elevation pages and plan/render directional elevation crops.
+
+        Passive and best-effort: this method NEVER raises. Any failure is logged
+        and recorded in the returned payload's warnings, so schedule extraction
+        and the overall run are unaffected. It does not count openings/tags or
+        check dimensions.
+        """
+        # Local imports keep the elevation feature self-contained and avoid any
+        # import cost when there are no elevation candidates.
+        from app.services.extraction.pdf.elevation_crop_planner import PDFElevationCropPlanner
+        from app.services.extraction.pdf.elevation_crop_renderer import PDFElevationCropRenderer
+        from app.services.extraction.pdf.elevation_detector import PDFElevationDetector
+
+        payload: Dict = {"enabled": False, "pages": [], "regions": [], "warnings": []}
+        try:
+            if routing is None or not routing.elevation_candidates:
+                return payload
+            payload["enabled"] = True
+
+            log_section("E. Passive elevation branch (M2)")
+            candidates = PDFElevationDetector().detect(
+                doc, routing.elevation_candidates, outline_titles_by_page
+            )
+            if not candidates:
+                return payload
+
+            elev_pages = self._routed_to_analyses(
+                doc, routing.elevation_candidates, outline_titles_by_page
+            )
+            pa_by_index = {pa.page_index: pa for pa in elev_pages}
+            rendered = renderer.render_selected_pages(doc, elev_pages, out_dir)
+            rp_by_index = {rp.page_index: rp for rp in rendered}
+
+            planner = PDFElevationCropPlanner(self.config, llm_client)
+            crop_renderer = PDFElevationCropRenderer(self.config, renderer)
+
+            for cand in candidates:
+                rp = rp_by_index.get(cand.page_index)
+                pa = pa_by_index.get(cand.page_index)
+                if rp is None:
+                    continue
+                try:
+                    plan = planner.plan(cand, rp, pa.text if pa else "")
+                    region_dicts, overlay_path = crop_renderer.render_page_regions(
+                        doc, cand, plan.elevation_regions, out_dir
+                    )
+                    payload["pages"].append({
+                        "page_number": cand.page_number,
+                        "page_index": cand.page_index,
+                        "sheet_number": cand.sheet_number,
+                        "sheet_title": cand.sheet_title,
+                        "directions": cand.directions,
+                        "scale": cand.scale,
+                        "source": cand.source,
+                        "confidence": cand.confidence,
+                        "contains_elevation": plan.contains_elevation,
+                        "region_count": len([r for r in region_dicts if r.get("valid")]),
+                        "overlay_path": overlay_path,
+                        "rendered_page_png": rp.png_path,
+                    })
+                    payload["regions"].extend(region_dicts)
+                    payload["warnings"].extend(plan.warnings)
+                except Exception as exc:
+                    msg = f"Elevation crop planning failed for page {cand.page_number}: {exc}"
+                    log_debug(msg)
+                    payload["warnings"].append(msg)
+
+            log_section("E4. Elevation branch summary")
+            log_debug(f"Detected elevation pages: {[p['page_number'] for p in payload['pages']]}")
+            valid_regions = [r for r in payload["regions"] if r.get("valid")]
+            log_debug(f"Planned elevation regions: {len(valid_regions)}")
+            for r in valid_regions:
+                log_debug(f"  crop: page {r['page_number']} {r['direction']} -> {r['png_path']}")
+            if payload["warnings"]:
+                log_debug(f"Elevation warnings: {payload['warnings']}")
+        except Exception as exc:
+            msg = f"Elevation branch failed (non-fatal): {exc}"
+            log_debug(msg)
+            payload["warnings"].append(msg)
+
+        return payload
