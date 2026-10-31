@@ -112,12 +112,16 @@ Important rules:
 - If a field is absent, return an empty string.
 - Preserve tag labels exactly as shown, such as W1, W-1, W01, D1, D-1, A, B, etc.
 - Prefer actual schedule table values over notes, legends, or general specifications.
-- Elevation and floor-plan pages are usually not schedule pages. Do NOT infer or count window/door quantities from floor plans or elevations.
-- Transcribe width/height verbatim as shown (FT/IN, inches, feet, or architectural notation). Preserve the visible representation; do not convert units.
+- Elevation and floor-plan pages are usually not schedule pages. Do NOT infer or count window/door QUANTITIES from floor plans, elevations, or details. (Reading width/height dimensions from a drawing IS allowed, but only per the WIDTH/HEIGHT rule below — never quantities.)
+- WIDTH/HEIGHT dimensions — source them in this strict priority order (applies to BOTH windows and doors):
+  1. SCHEDULE TABLE FIRST: if a schedule table lists a width and/or height for the tag, use the TABLE value. The table is always the primary, first-priority source.
+  2. CROSS-CHECK THE DRAWING: compare each table value against the elevation/detail drawing for that same tag. If the drawing shows a different width or height, STILL keep the TABLE value, and add a brief note in that row's notes field recording the discrepancy (e.g. "Table height 4'-0; drawing shows 3'-10; used table value").
+  3. NO TABLE VALUE: if a dimension is not in any table (or the page has no schedule table at all), read it directly from the drawing — use the opening's dimension lines/annotations and take its overall OUTER width and height. Add a note in that row stating the dimension was read from the drawing, not a table.
+  Transcribe width/height verbatim as shown (FT/IN, inches, feet, or architectural notation); preserve the visible representation and do not convert units. Do NOT guess a dimension that is neither tabulated nor explicitly dimensioned on the drawing — return "" for it instead.
 - Quantity may be shown as QTY, COUNT, NO., or repeated tag rows. Extract explicit quantity only. Do not count openings from drawings.
 - Do NOT compute area in this output. Area is recomputed deterministically downstream. (Windows may carry an explicit area string only if the schedule lists one; door rows have no area field at all.)
 - For windows: U-value may also appear as U-factor (map to u_value); SHGC, VT, glass type, frame/material, and opening type should be extracted when explicitly available.
-- For doors: extract fire_rating (e.g. "20 MIN", "45 MIN", "90 MIN", or "" if none), self_closing (e.g. "YES"/"NO" or "" if not stated), material, glass_type, and opening_type when explicitly available. Doors have no U-value/SHGC/VT.
+- For doors: extract fire_rating (e.g. "20 MIN", "45 MIN", "90 MIN", or "" if none), self_closing (e.g. "YES"/"NO" or "" if not stated), material, glass_type, and opening_type when explicitly available. Glazed doors (sliding glass, glass entry, storefront doors) may also list NFRC U-value (a.k.a. U-factor; map to u_value), SHGC, and VT — extract these when explicitly shown, otherwise return "". Non-glazed doors typically have none; do not invent them.
 - Confidence should reflect how certain you are that the row values were read correctly.
 
 Classification labels:
