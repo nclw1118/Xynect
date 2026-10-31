@@ -34,7 +34,7 @@ def _supports_custom_temperature(model: str) -> bool:
 class LangChainLLMClient:
     """Wraps ChatOpenAI + structured-output + multimodal invocation."""
 
-    def __init__(self, config: PDFExtractionConfig):
+    def __init__(self, config: PDFExtractionConfig, reasoning_effort: str | None = None):
         api_key = (config.openai_api_key or "").strip()
         if not api_key:
             raise RuntimeError(
@@ -49,13 +49,26 @@ class LangChainLLMClient:
             "model": config.llm_model,
             "api_key": api_key,
         }
-        # Only send temperature=0 to models that support a custom value; reasoning
-        # models (gpt-5 non-chat, o1/o3/o4) reject it and must use their default.
-        if _supports_custom_temperature(config.llm_model):
+        if reasoning_effort:
+            llm_kwargs["reasoning_effort"] = reasoning_effort
+
+        # temperature=0 is only sent when the model supports a custom value AND
+        # (for reasoning models) effort is "none". Any higher reasoning effort
+        # rejects a custom temperature with a 400, so we omit it and let the
+        # model use its default.
+        allow_custom_temp = _supports_custom_temperature(config.llm_model)
+        if reasoning_effort not in (None, "none"):
+            allow_custom_temp = False
+        if allow_custom_temp:
             llm_kwargs["temperature"] = 0
 
         self._llm = ChatOpenAI(**llm_kwargs)
         self._model_name = config.llm_model
+        self._reasoning_effort = reasoning_effort
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        return self._reasoning_effort
 
     @property
     def model_name(self) -> str:

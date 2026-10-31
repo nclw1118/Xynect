@@ -34,6 +34,12 @@ class PDFExtractionConfig:
     openai_api_key: str
     llm_model: str
 
+    # Per-stage reasoning effort (all stages share llm_model).
+    project_info_effort: str
+    crop_plan_effort: str
+    schedule_extract_effort: str
+    elevation_crop_plan_effort: str
+
     @classmethod
     def from_settings(cls) -> "PDFExtractionConfig":
         from app.core.config import settings
@@ -54,4 +60,8 @@ class PDFExtractionConfig:
             save_debug_artifacts=settings.pdf_save_debug_artifacts,
             openai_api_key=settings.openai_api_key,
             llm_model=settings.llm_model,
+            project_info_effort=settings.pdf_project_info_reasoning_effort,
+            crop_plan_effort=settings.pdf_crop_plan_reasoning_effort,
+            schedule_extract_effort=settings.pdf_schedule_extract_reasoning_effort,
+            elevation_crop_plan_effort=settings.pdf_elevation_crop_plan_reasoning_effort,
         )

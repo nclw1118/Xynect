@@ -185,11 +185,31 @@ class PDFExtractionService:
             # downstream schedule extraction. Initialize once, here, so an
             # invalid API key fails fast before we burn time rendering pages.
             renderer = PDFRenderer(self.config)
-            llm_client = LangChainLLMClient(self.config)
+            # Per-stage LLM clients: same model (LLM_MODEL), different reasoning
+            # effort. Constructing the first client validates the API key up front.
+            pi_client = LangChainLLMClient(
+                self.config, reasoning_effort=self.config.project_info_effort
+            )
+            crop_plan_client = LangChainLLMClient(
+                self.config, reasoning_effort=self.config.crop_plan_effort
+            )
+            schedule_client = LangChainLLMClient(
+                self.config, reasoning_effort=self.config.schedule_extract_effort
+            )
+            elevation_client = LangChainLLMClient(
+                self.config, reasoning_effort=self.config.elevation_crop_plan_effort
+            )
+            log_debug(
+                "LLM per-stage reasoning effort — "
+                f"project_info={self.config.project_info_effort}, "
+                f"crop_plan={self.config.crop_plan_effort}, "
+                f"schedule={self.config.schedule_extract_effort}, "
+                f"elevation_crop_plan={self.config.elevation_crop_plan_effort}"
+            )
 
             # ── Stage 1b: select project-info pages ───────────────────────────
             progress.start(STEP_PROJECT_INFO_SELECT)
-            pi_extractor = PDFProjectInfoExtractor(self.config, llm_client)
+            pi_extractor = PDFProjectInfoExtractor(self.config, pi_client)
             if use_fast_path and routing is not None:
                 # Use the router's lightweight project-info candidates so we do
                 # not depend on the heavy analyzer having run.
@@ -234,7 +254,7 @@ class PDFExtractionService:
 
             # ── Stage 4: LLM crop planning ────────────────────────────────────
             progress.start(STEP_PLAN_CROPS)
-            crop_planner = PDFCropPlanner(self.config, llm_client)
+            crop_planner = PDFCropPlanner(self.config, crop_plan_client)
             crop_plans = crop_planner.plan(selected_pages, rendered_pages)
             progress.complete(STEP_PLAN_CROPS)
 
@@ -242,7 +262,7 @@ class PDFExtractionService:
             progress.start(STEP_EXTRACT)
             crop_renderer = PDFCropRenderer(self.config, renderer)
             crop_renders = crop_renderer.render_from_plans(doc, selected_pages, crop_plans, out_dir)
-            extractor = PDFScheduleExtractor(self.config, llm_client)
+            extractor = PDFScheduleExtractor(self.config, schedule_client)
             llm_results = extractor.extract(selected_pages, rendered_pages, crop_plans, crop_renders)
             progress.complete(STEP_EXTRACT)
 
@@ -271,7 +291,7 @@ class PDFExtractionService:
             # Never fatal: failures are logged + recorded in elevation_regions.json
             # but must not change schedule extraction or fail the run.
             elevation_payload = self._run_elevation_branch(
-                doc, routing, outline_titles_by_page, renderer, llm_client, out_dir
+                doc, routing, outline_titles_by_page, renderer, elevation_client, out_dir
             )
             debug_writer.write_elevation_regions(out_dir, elevation_payload)
             debug_trace["elevation_pages"] = [p["page_number"] for p in elevation_payload["pages"]]

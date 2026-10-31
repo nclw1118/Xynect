@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     # path is skipped for schedule/elevation candidate selection.
     pdf_fast_router_enabled: bool = True
 
+    # Per-stage reasoning effort for the PDF vision pipeline (all stages share
+    # LLM_MODEL). Allowed: "none" | "low" | "medium" | "high". NOTE: a custom
+    # temperature=0 is only compatible with effort="none"; the client omits
+    # temperature for any higher effort (the API rejects it otherwise).
+    pdf_project_info_reasoning_effort: str = "none"      # OCR-style field extraction
+    pdf_crop_plan_reasoning_effort: str = "medium"       # spatial crop boundaries
+    pdf_schedule_extract_reasoning_effort: str = "high"  # dimension interpretation + cross-check
+    pdf_elevation_crop_plan_reasoning_effort: str = "medium"  # full-elevation detection
+
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
