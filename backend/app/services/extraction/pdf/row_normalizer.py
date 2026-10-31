@@ -39,9 +39,10 @@ class PDFRowNormalizer:
     def normalize_door_row(row: Dict[str, Any], source_page: int) -> Dict[str, Any]:
         """Normalize one door schedule row.
 
-        Door rows have no NFRC fields (u_value/shgc/vt). `area` is left as the
-        LLM gave it (usually empty) and recomputed deterministically downstream.
-        The raw LLM row is preserved in original_extraction.
+        NFRC fields (u_value/shgc/vt) apply to glazed doors and are "" otherwise.
+        `area` is left as the LLM gave it (usually empty) and recomputed
+        deterministically downstream. The raw LLM row is preserved in
+        original_extraction.
         """
         return {
             "tag": clean_string(row.get("tag")),
@@ -55,6 +56,9 @@ class PDFRowNormalizer:
             "fire_rating": clean_string(row.get("fire_rating")),
             "self_closing": clean_string(row.get("self_closing")),
             "glass_type": clean_string(row.get("glass_type")),
+            "u_value": clean_string(row.get("u_value")),
+            "shgc": clean_string(row.get("shgc")),
+            "vt": clean_string(row.get("vt")),
             "confidence": float(row.get("confidence", 0.0) or 0.0),
             "notes": clean_string(row.get("notes")),
             "source_page": source_page,

@@ -58,6 +58,9 @@ export interface DoorItem {
   fire_rating: string | null;
   self_closing: string | null;
   glass_type: string | null;
+  u_value: string | null;
+  shgc: string | null;
+  vt: string | null;
   confidence: number;
   notes: string | null;
 }

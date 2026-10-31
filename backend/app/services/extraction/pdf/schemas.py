@@ -66,7 +66,7 @@ class ExtractedDoorRow(BaseModel):
 
     No `area` field on purpose: door area is recomputed deterministically from
     width/height after extraction (the LLM must not compute area). NFRC fields
-    (u_value/shgc/vt) are window-specific and intentionally omitted for doors.
+    (u_value/shgc/vt) apply to glazed doors and are "" when not shown.
     """
 
     tag: str
@@ -78,6 +78,9 @@ class ExtractedDoorRow(BaseModel):
     fire_rating: str
     self_closing: str
     glass_type: str
+    u_value: str
+    shgc: str
+    vt: str
     notes: str
     confidence: float
 

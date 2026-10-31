@@ -46,12 +46,11 @@ def test_patch_extraction_request_supports_door_items():
     assert req.door_items[0].fire_rating == "90 MIN"
 
 
-def test_door_item_schema_has_door_fields_not_nfrc():
+def test_door_item_schema_has_door_and_nfrc_fields():
     fields = DoorItemSchema.model_fields.keys()
-    for f in ("fire_rating", "self_closing", "opening_type", "glass_type"):
+    # Door-specific fields plus NFRC fields (glazed doors carry U-value/SHGC/VT).
+    for f in ("fire_rating", "self_closing", "opening_type", "glass_type", "u_value", "shgc", "vt"):
         assert f in fields, f
-    for f in ("u_value", "shgc", "vt"):
-        assert f not in fields, f
 
 
 # ── PDF structured-output schema ───────────────────────────────────────────────
@@ -77,7 +76,8 @@ def test_extraction_page_response_parses_window_and_door_rows():
             {
                 "tag": "D-1", "opening_type": "Single", "quantity": "1", "width": "3'-0\"",
                 "height": "7'-0\"", "material": "Steel", "fire_rating": "90 MIN",
-                "self_closing": "YES", "glass_type": "", "notes": "exterior", "confidence": 0.88,
+                "self_closing": "YES", "glass_type": "Tempered", "u_value": "0.40",
+                "shgc": "0.30", "vt": "0.45", "notes": "glazed exterior", "confidence": 0.88,
             }
         ],
         "warnings": [],
@@ -85,9 +85,10 @@ def test_extraction_page_response_parses_window_and_door_rows():
     resp = ExtractionPageResponse.model_validate(payload)
     assert len(resp.window_rows) == 1
     assert len(resp.door_rows) == 1
-    # Door rows have no NFRC / area fields in the schema.
+    # Door rows carry NFRC fields (glazed doors) but still have no `area` field.
     door_fields = type(resp.door_rows[0]).model_fields.keys()
-    assert "u_value" not in door_fields
+    assert "u_value" in door_fields
+    assert resp.door_rows[0].u_value == "0.40"
     assert "area" not in door_fields
 
 
@@ -124,12 +125,14 @@ def test_normalizer_keeps_windows_and_doors_separate():
     assert "u_value" in windows[0]
     assert "fire_rating" not in windows[0]
 
-    # Door rows carry door fields, not NFRC.
+    # Door rows carry door-specific fields; windows do not.
     assert windows[0]["tag"] == "W-1"
     assert doors[0]["tag"] == "D-1"
     assert doors[0]["fire_rating"] == "90 MIN"
     assert doors[0]["self_closing"] == "YES"
-    assert "u_value" not in doors[0]
+    # Doors now also carry NFRC fields (glazed doors); windows carry no door-only fields.
+    assert "u_value" in doors[0]
+    assert "fire_rating" not in windows[0]
 
 
 def test_normalizer_dedupes_doors_independently():

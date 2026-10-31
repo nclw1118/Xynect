@@ -46,6 +46,9 @@ class DoorItemSchema(BaseModel):
     fire_rating: Optional[str] = None
     self_closing: Optional[str] = None
     glass_type: Optional[str] = None
+    u_value: Optional[str] = None
+    shgc: Optional[str] = None
+    vt: Optional[str] = None
     confidence: float = 0.0
     notes: Optional[str] = None
 
@@ -97,6 +100,9 @@ class PatchDoorItem(BaseModel):
     fire_rating: Optional[str] = None
     self_closing: Optional[str] = None
     glass_type: Optional[str] = None
+    u_value: Optional[str] = None
+    shgc: Optional[str] = None
+    vt: Optional[str] = None
     notes: Optional[str] = None
 
 

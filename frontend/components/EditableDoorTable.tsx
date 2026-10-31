@@ -37,6 +37,9 @@ const COLS: ColDef[] = [
   { key: "fire_rating",  label: "Fire Rating",  width: "w-24",  type: "text"      },
   { key: "self_closing", label: "Self Closing", width: "w-24",  type: "text"      },
   { key: "glass_type",   label: "Glass Type",   width: "w-28",  type: "text"      },
+  { key: "u_value",      label: "U-Value",      width: "w-20",  type: "text"      },
+  { key: "shgc",         label: "SHGC",         width: "w-20",  type: "text"      },
+  { key: "vt",           label: "VT",           width: "w-20",  type: "text"      },
   { key: "confidence",   label: "Conf",         width: "w-16",  type: "readonly"  },
   { key: "notes",        label: "Notes",        width: "w-48",  type: "notes"     },
 ];

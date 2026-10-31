@@ -27,7 +27,8 @@ _EDITABLE_WINDOW_FIELDS = [
 
 _EDITABLE_DOOR_FIELDS = [
     "tag", "opening_type", "quantity", "width", "height", "area",
-    "material", "fire_rating", "self_closing", "glass_type", "notes",
+    "material", "fire_rating", "self_closing", "glass_type",
+    "u_value", "shgc", "vt", "notes",
 ]
 
 
@@ -45,6 +46,9 @@ def _to_door_schema(item: DoorItem) -> DoorItemSchema:
         fire_rating=item.fire_rating,
         self_closing=item.self_closing,
         glass_type=item.glass_type,
+        u_value=item.u_value,
+        shgc=item.shgc,
+        vt=item.vt,
         confidence=item.confidence,
         notes=item.notes,
     )

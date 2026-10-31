@@ -25,6 +25,10 @@ class DoorItem(Base):
     fire_rating = Column(String(64), nullable=True)
     self_closing = Column(String(32), nullable=True)
     glass_type = Column(String(128), nullable=True)
+    # NFRC performance fields: present on glazed doors (sliding/glass entry); blank otherwise.
+    u_value = Column(String(32), nullable=True)
+    shgc = Column(String(32), nullable=True)
+    vt = Column(String(32), nullable=True)
     confidence = Column(Float, nullable=False, default=0.0)
     notes = Column(Text, nullable=True)
 
