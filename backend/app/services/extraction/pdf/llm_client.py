@@ -15,6 +15,22 @@ from langchain_openai import ChatOpenAI
 from app.services.extraction.pdf.config import PDFExtractionConfig
 
 
+def _supports_custom_temperature(model: str) -> bool:
+    """Whether `model` accepts a non-default `temperature`.
+
+    Reasoning-class models reject anything other than the default temperature=1
+    (e.g. gpt-5 non-chat, o1/o3/o4) and 400 if a value like 0 is sent. Mirrors
+    the guard in app.services.llm.openai_provider so the vision path here behaves
+    the same instead of erroring on current gpt-5.x models.
+    """
+    m = model.lower()
+    if m.startswith(("o1", "o3", "o4")):
+        return False
+    if m.startswith("gpt-5") and "chat" not in m:
+        return False
+    return True
+
+
 class LangChainLLMClient:
     """Wraps ChatOpenAI + structured-output + multimodal invocation."""
 
@@ -29,11 +45,16 @@ class LangChainLLMClient:
         # the side effect from the original prototype to avoid surprise failures.
         os.environ["OPENAI_API_KEY"] = api_key
 
-        self._llm = ChatOpenAI(
-            model=config.llm_model,
-            api_key=api_key,
-            temperature=0,
-        )
+        llm_kwargs: Dict[str, Any] = {
+            "model": config.llm_model,
+            "api_key": api_key,
+        }
+        # Only send temperature=0 to models that support a custom value; reasoning
+        # models (gpt-5 non-chat, o1/o3/o4) reject it and must use their default.
+        if _supports_custom_temperature(config.llm_model):
+            llm_kwargs["temperature"] = 0
+
+        self._llm = ChatOpenAI(**llm_kwargs)
         self._model_name = config.llm_model
 
     @property
