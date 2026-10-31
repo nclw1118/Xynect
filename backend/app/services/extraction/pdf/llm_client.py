@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
 from app.services.extraction.pdf.config import PDFExtractionConfig
+from app.services.extraction.pdf.cost_tracker import CostTracker
 
 
 def _supports_custom_temperature(model: str) -> bool:
@@ -34,7 +35,13 @@ def _supports_custom_temperature(model: str) -> bool:
 class LangChainLLMClient:
     """Wraps ChatOpenAI + structured-output + multimodal invocation."""
 
-    def __init__(self, config: PDFExtractionConfig, reasoning_effort: str | None = None):
+    def __init__(
+        self,
+        config: PDFExtractionConfig,
+        reasoning_effort: str | None = None,
+        stage: str | None = None,
+        cost_tracker: CostTracker | None = None,
+    ):
         api_key = (config.openai_api_key or "").strip()
         if not api_key:
             raise RuntimeError(
@@ -65,6 +72,8 @@ class LangChainLLMClient:
         self._llm = ChatOpenAI(**llm_kwargs)
         self._model_name = config.llm_model
         self._reasoning_effort = reasoning_effort
+        self._stage = stage
+        self._cost_tracker = cost_tracker
 
     @property
     def reasoning_effort(self) -> str | None:
@@ -75,10 +84,17 @@ class LangChainLLMClient:
         return self._model_name
 
     def with_structured_output(self, schema):
-        return self._llm.with_structured_output(schema)
+        # include_raw=True so invoke_multimodal can read token usage off the raw
+        # AIMessage for cost accounting while still returning the parsed object.
+        return self._llm.with_structured_output(schema, include_raw=True)
 
-    @staticmethod
-    def invoke_multimodal(structured_llm: Any, prompt: str, image_data_uris: List[str]) -> Any:
+    def invoke_multimodal(
+        self,
+        structured_llm: Any,
+        prompt: str,
+        image_data_uris: List[str],
+        label: str | None = None,
+    ) -> Any:
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
         for uri in image_data_uris:
             content.append({
@@ -88,4 +104,20 @@ class LangChainLLMClient:
                     "detail": "high",
                 },
             })
-        return structured_llm.invoke([HumanMessage(content=content)])
+        result = structured_llm.invoke([HumanMessage(content=content)])
+
+        # structured_llm was built with include_raw=True, so result is a dict:
+        # {"raw": AIMessage, "parsed": <schema>, "parsing_error": ...}.
+        raw = result.get("raw")
+        if self._cost_tracker is not None:
+            self._cost_tracker.record(
+                stage=self._stage or "unknown",
+                model=self._model_name,
+                reasoning_effort=self._reasoning_effort,
+                usage_metadata=getattr(raw, "usage_metadata", None),
+                label=label,
+            )
+
+        if result.get("parsing_error"):
+            raise result["parsing_error"]
+        return result.get("parsed")

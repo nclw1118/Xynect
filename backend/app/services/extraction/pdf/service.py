@@ -35,6 +35,7 @@ from app.services.extraction.pdf.fast_page_router import (
     FastPageRoutingResult,
     RoutedPage,
 )
+from app.services.extraction.pdf.cost_tracker import CostTracker
 from app.services.extraction.pdf.llm_client import LangChainLLMClient
 from app.services.extraction.pdf.models import PageAnalysis, PDFExtractionArtifacts
 from app.services.extraction.pdf.page_analyzer import PDFPageAnalyzer
@@ -110,6 +111,7 @@ class PDFExtractionService:
         log_handle = open_session_log(out_dir / "extraction.log")
 
         doc = None
+        cost_tracker: CostTracker | None = None
         try:
             log_section("PDF Extraction Service Started")
             log_debug(f"session_id={session_id}, file_type={file_type}")
@@ -187,17 +189,26 @@ class PDFExtractionService:
             renderer = PDFRenderer(self.config)
             # Per-stage LLM clients: same model (LLM_MODEL), different reasoning
             # effort. Constructing the first client validates the API key up front.
+            # Each client records token usage into the shared cost tracker, tagged
+            # by stage; the report is written to the session dir at the end.
+            cost_tracker = cost_tracker or CostTracker(
+                session_id=session_id, model=self.config.llm_model
+            )
             pi_client = LangChainLLMClient(
-                self.config, reasoning_effort=self.config.project_info_effort
+                self.config, reasoning_effort=self.config.project_info_effort,
+                stage="project_info", cost_tracker=cost_tracker,
             )
             crop_plan_client = LangChainLLMClient(
-                self.config, reasoning_effort=self.config.crop_plan_effort
+                self.config, reasoning_effort=self.config.crop_plan_effort,
+                stage="crop_planning", cost_tracker=cost_tracker,
             )
             schedule_client = LangChainLLMClient(
-                self.config, reasoning_effort=self.config.schedule_extract_effort
+                self.config, reasoning_effort=self.config.schedule_extract_effort,
+                stage="schedule_extraction", cost_tracker=cost_tracker,
             )
             elevation_client = LangChainLLMClient(
-                self.config, reasoning_effort=self.config.elevation_crop_plan_effort
+                self.config, reasoning_effort=self.config.elevation_crop_plan_effort,
+                stage="elevation_crop_planning", cost_tracker=cost_tracker,
             )
             log_debug(
                 "LLM per-stage reasoning effort — "
@@ -456,6 +467,16 @@ class PDFExtractionService:
             )
 
         finally:
+            # Persist the LLM cost report even on partial failure, so spend is
+            # always accounted. Best-effort: write() never raises.
+            if cost_tracker is not None:
+                cost_tracker.write(out_dir)
+                totals = cost_tracker.to_dict()["totals"]
+                log_debug(
+                    f"LLM cost: ${totals['cost_usd']:.6f} over {totals['calls']} calls "
+                    f"(in={totals['input_tokens']}, cached={totals['cached_input_tokens']}, "
+                    f"out={totals['output_tokens']}) -> {out_dir / 'llm_cost.json'}"
+                )
             if doc is not None:
                 doc.close()
             close_session_log(log_handle)
